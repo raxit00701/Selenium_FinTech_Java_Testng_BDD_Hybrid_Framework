@@ -207,7 +207,7 @@ jobs:
           }
           Write-Output "::endgroup::"
 
-      # =========================================================
+     # =========================================================
       # 7. EXECUTE SELENIUM SUITE (TESTNG OR BDD / SERIAL OR PARALLEL)
       # =========================================================
       - name: Run Selenium Automation Suite
@@ -256,6 +256,7 @@ jobs:
           $mvnArgs = @(
             "test",
             "-B",
+            "-e",
             "-Dstyle.color=always",
             "-P$suiteType",
             "-Dexecution.mode=$execMode",
@@ -290,8 +291,14 @@ jobs:
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
           & mvn @mvnArgs
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            Get-ChildItem -Path "target/surefire-reports/*.dumpstream" -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Output "::group::Surefire Dump ($($_.Name))"
+              Get-Content -Path $_.FullName
+              Write-Output "::endgroup::"
+            }
+            exit $exitCode
           }
 
       # =========================================================
