@@ -17,7 +17,7 @@ on:
           - bdd-serial
           - bdd-parallel
       test_class:
-        description: 'Optional: Run any single class independently (e.g., tests.LoginTest or runners.TestRunner)'
+        description: 'Optional: Run any single class independently (e.g., tests.Create_Catalog or runners.TestRunner)'
         type: string
         required: false
         default: ''
@@ -63,7 +63,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java & cache Maven dependencies
+      - name: Set up Java 17 & cache Maven dependencies
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
