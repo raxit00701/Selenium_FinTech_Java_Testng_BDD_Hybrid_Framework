@@ -153,54 +153,62 @@ jobs:
       # =========================================================
       # 6. START MARIADB, SEED BASELINE DATA, AND BOOT KILL BILL + KAUI
       # =========================================================
-      # =========================================================
+       # =========================================================
       # 6. START MARIADB, SEED BASELINE DATA, AND BOOT KILL BILL + KAUI
       # =========================================================
       - name: Start Kill Bill, Kaui & MariaDB Services
         run: |
-          echo "::group::Starting MariaDB Container"
+          echo "::group::Starting MariaDB & Importing ci-seed.sql"
           if [ ! -s "ci-seed.sql" ]; then
             echo "ERROR: ci-seed.sql is missing or empty in repository root."
             exit 1
           fi
 
           docker compose -f docker-compose.yml up -d db
-          for i in $(seq 1 30); do
+          for i in $(seq 1 25); do
             if docker compose -f docker-compose.yml exec -T -e DB_USERNAME="$DB_USERNAME" -e DB_PASSWORD="$DB_PASSWORD" db sh -c 'ADMIN=$(command -v mariadb-admin || command -v mysqladmin); "$ADMIN" ping -h localhost -u"$DB_USERNAME" -p"$DB_PASSWORD" --silent'; then
               echo "MariaDB is ready on localhost:3307!"
               break
             fi
-            if [ "$i" -eq 30 ]; then
-              echo "Timed out waiting for MariaDB."
-              docker compose -f docker-compose.yml logs db
-              exit 1
-            fi
-            sleep 2
+            sleep 1
           done
 
-          echo "Importing baseline tenant & account data from ci-seed.sql..."
           sed -i '1s/^\xEF\xBB\xBF//' ci-seed.sql
-          docker compose -f docker-compose.yml exec -T -e DB_USERNAME="$DB_USERNAME" -e DB_PASSWORD="$DB_PASSWORD" db sh -c 'CLIENT=$(command -v mariadb || command -v mysql); "$CLIENT" -u"$DB_USERNAME" -p"$DB_PASSWORD"' < ci-seed.sql
-          docker compose -f docker-compose.yml exec -T -e DB_USERNAME="$DB_USERNAME" -e DB_PASSWORD="$DB_PASSWORD" db sh -c 'CLIENT=$(command -v mariadb || command -v mysql); "$CLIENT" -u"$DB_USERNAME" -p"$DB_PASSWORD" -e "SELECT id, name FROM kaui.kaui_tenants; SELECT id, external_key FROM killbill.accounts WHERE id='\''d1b18d93-13c3-4315-b5e5-2e98f59e9fbb'\'';"'
+          {
+            echo "SET autocommit=0; SET unique_checks=0; SET foreign_key_checks=0;"
+            cat ci-seed.sql
+            echo "COMMIT; SET unique_checks=1; SET foreign_key_checks=1;"
+          } | docker compose -f docker-compose.yml exec -T -e DB_USERNAME="$DB_USERNAME" -e DB_PASSWORD="$DB_PASSWORD" db sh -c 'CLIENT=$(command -v mariadb || command -v mysql); "$CLIENT" -u"$DB_USERNAME" -p"$DB_PASSWORD"'
           echo "::endgroup::"
 
-          echo "::group::Starting Kill Bill (8080) & Kaui (9090)"
-          docker compose -f docker-compose.yml up -d killbill kaui
-          for i in $(seq 1 60); do
-            kb_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/1.0/healthcheck || echo "000")
+          echo "::group::Booting Kill Bill (8080) & Kaui (9090)"
+          cat <<EOF > docker-compose.ci.yml
+          services:
+            killbill:
+              environment:
+                - JAVA_OPTS=-Xms512m -Xmx1024m -XX:+TieredCompilation -XX:TieredStopAtLevel=1 -Djava.security.egd=file:/dev/./urandom
+          EOF
+
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d killbill kaui
+          for i in $(seq 1 45); do
+            kb_body=$(curl -s -w "\n%{http_code}" http://localhost:8080/1.0/healthcheck || echo -e "\n000")
+            kb_status=$(echo "$kb_body" | tail -n1)
+            kb_msg=$(echo "$kb_body" | head -n1 | cut -c1-120)
             kaui_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9090 || echo "000")
-            echo "Attempt $i/60 -> Kill Bill HTTP: $kb_status | Kaui HTTP: $kaui_status"
+
+            echo "Attempt $i/45 -> Kill Bill: $kb_status ($kb_msg) | Kaui: $kaui_status"
             if [[ "$kb_status" == "200" && ("$kaui_status" == "200" || "$kaui_status" == "302") ]]; then
               echo "Kill Bill and Kaui are ready!"
               break
             fi
-            if [ "$i" -eq 60 ]; then
-              echo "Timed out waiting for Kill Bill / Kaui containers."
-              docker compose -f docker-compose.yml logs --tail=100
+            if [ "$i" -eq 45 ]; then
+              echo "Timed out waiting for Kill Bill / Kaui."
+              docker compose -f docker-compose.yml logs --tail=120 killbill
               exit 1
             fi
-            sleep 3
+            sleep 2
           done
+          rm -f docker-compose.ci.yml
           echo "::endgroup::"
       
 
