@@ -17,7 +17,7 @@ on:
           - bdd-serial
           - bdd-parallel
       test_class:
-        description: 'Optional: Run any single class independently (e.g., tests.Create_Catalog or runners.TestRunner)'
+        description: 'Optional: Run any single class independently (e.g., tests.LoginTest or runners.TestRunner)'
         type: string
         required: false
         default: ''
@@ -36,7 +36,7 @@ on:
       incognito:
         description: 'Run in incognito/private mode'
         type: boolean
-        default: false
+        default: true
       block_images:
         description: 'Block images for faster loads (-DBLOCK_IMAGES)'
         type: boolean
@@ -82,7 +82,7 @@ jobs:
           $suite       = if ([string]::IsNullOrWhiteSpace($env:SUITE))        { "testng-serial" } else { $env:SUITE.Trim() }
           $browser     = if ([string]::IsNullOrWhiteSpace($env:BROWSER))      { "chrome" }        else { $env:BROWSER.Trim() }
           $headless    = if ([string]::IsNullOrWhiteSpace($env:HEADLESS))     { "true" }          else { $env:HEADLESS.Trim().ToLower() }
-          $incognito   = if ([string]::IsNullOrWhiteSpace($env:INCOGNITO))    { "false" }         else { $env:INCOGNITO.Trim().ToLower() }
+          $incognito   = if ([string]::IsNullOrWhiteSpace($env:INCOGNITO))    { "true" }          else { $env:INCOGNITO.Trim().ToLower() }
           $blockImages = if ([string]::IsNullOrWhiteSpace($env:BLOCK_IMAGES)) { "false" }         else { $env:BLOCK_IMAGES.Trim().ToLower() }
 
           $mvnArgs = @(
