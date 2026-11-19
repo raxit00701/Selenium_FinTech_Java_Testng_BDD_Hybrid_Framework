@@ -27,14 +27,7 @@ public class Base {
     @BeforeMethod
     public void setUp() {
 
-        // 1. Validate ALL config first (fail fast, before paying for a browser launch)
-        String browser = getEnv("BROWSER");
-        if (browser == null || browser.isBlank()) {
-            throw new IllegalArgumentException("CRITICAL ERROR: 'BROWSER' is not set in system properties or .env file!");
-        }
-
-        boolean headless = Boolean.parseBoolean(getEnv("HEADLESS"));
-        boolean incognito = Boolean.parseBoolean(getEnv("INCOGNITO"));
+        // 1. Validate URL config first (fail fast, before paying for a browser launch)
         String baseUrl = getBaseUrl();
 
         // 2. Configure REST Assured (Optional)
@@ -43,8 +36,9 @@ public class Base {
             RestAssured.baseURI = apiBaseUrl;
         }
 
-        // 3. Get a browser: launches once per thread, then reuses the warm one
-        boolean reused = DriverFactory.initDriver(browser, headless, incognito);
+        // 3. Get a browser: DriverFactory resolves BROWSER, HEADLESS, and INCOGNITO
+        // (with -DBROWSER, -DHEADLESS, -DINCOGNITO CLI overrides) and reuses warm sessions
+        boolean reused = DriverFactory.initDriver();
         driver = DriverFactory.getDriver();
 
         // 4. A reused browser gets its cookies/storage wiped so every test starts clean
@@ -72,7 +66,7 @@ public class Base {
     }
 
     /**
-     * Fetches configuration prioritizing System Properties (e.g. -DBROWSER=edge)
+     * Fetches configuration prioritizing System Properties (e.g. -DBASE_URL=http://localhost:9090/)
      * over the .env file.
      *
      * @param key The environment variable key

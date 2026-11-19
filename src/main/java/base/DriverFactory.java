@@ -29,6 +29,14 @@ import utils.screenshot.ElementTracker;
 public final class DriverFactory {
 
     // =========================================================
+    // BROWSER, HEADLESS & INCOGNITO CONFIGURATION (CENTRALIZED)
+    // =========================================================
+
+    private static final String DEFAULT_BROWSER = "chrome";
+    private static final boolean DEFAULT_HEADLESS = false;
+    private static final boolean DEFAULT_INCOGNITO = false;
+
+    // =========================================================
     // CONSTANTS
     // =========================================================
 
@@ -72,21 +80,76 @@ public final class DriverFactory {
     }
 
     // =========================================================
+    // CONFIGURATION RESOLVERS (-D CLI OVERRIDE -> FACTORY DEFAULT)
+    // =========================================================
+
+    public static String resolveBrowser() {
+        String browser = getOverrideProperty("BROWSER", "browser");
+        return (browser != null) ? browser.toLowerCase(Locale.ROOT) : DEFAULT_BROWSER;
+    }
+
+    public static boolean resolveHeadless() {
+        String headless = getOverrideProperty("HEADLESS", "headless");
+        return (headless != null) ? Boolean.parseBoolean(headless) : DEFAULT_HEADLESS;
+    }
+
+    public static boolean resolveIncognito() {
+        String incognito = getOverrideProperty("INCOGNITO", "incognito");
+        return (incognito != null) ? Boolean.parseBoolean(incognito) : DEFAULT_INCOGNITO;
+    }
+
+    private static String getOverrideProperty(String upperKey, String lowerKey) {
+        String value = System.getProperty(upperKey);
+        if (value == null || value.isBlank()) {
+            value = System.getProperty(lowerKey);
+        }
+        if (value == null || value.isBlank()) {
+            value = System.getenv(upperKey);
+        }
+        if (value == null || value.isBlank()) {
+            value = System.getenv(lowerKey);
+        }
+        return (value != null && !value.isBlank()) ? value.trim() : null;
+    }
+
+    // =========================================================
     // INITIALIZE DRIVER (LAUNCH ONCE PER THREAD, THEN REUSE)
     // =========================================================
 
     /**
-     * Returns a ready browser for the current thread.
-     * <ul>
-     *   <li>If this thread already has a healthy browser with the same configuration, it is
-     *       reused (extra tabs closed, alerts dismissed, frame context reset).</li>
-     *   <li>Otherwise a new browser is launched (a dead or differently-configured one is quit first).</li>
-     * </ul>
+     * Initializes or reuses a browser using {@link #DEFAULT_BROWSER}, {@link #DEFAULT_HEADLESS},
+     * and {@link #DEFAULT_INCOGNITO} (overridable via {@code -DBROWSER}, {@code -DHEADLESS}, {@code -DINCOGNITO}).
      *
-     * @return true if an existing browser was reused (call {@link #resetSession(String)}
-     *         to wipe its cookies/storage), false if a brand-new browser was launched.
+     * @return true if an existing browser was reused, false if a brand-new browser was launched.
+     */
+    public static boolean initDriver() {
+        return initDriverInternal(resolveBrowser(), resolveHeadless(), resolveIncognito());
+    }
+
+    /**
+     * Backward-compatible overload: delegates to {@code DriverFactory}'s centralized configuration
+     * so {@code INCOGNITO} does not need to be read from {@code .env}.
+     */
+    public static boolean initDriver(boolean incognito) {
+        return initDriver();
+    }
+
+    /**
+     * Backward-compatible overload: delegates to {@code DriverFactory}'s centralized configuration
+     * so {@code BROWSER}, {@code HEADLESS}, and {@code INCOGNITO} do not need to be read from {@code .env}.
      */
     public static boolean initDriver(String browser, boolean headless, boolean incognito) {
+        return initDriver();
+    }
+
+    /**
+     * Explicit programmatic override when a specific test requires custom browser flags.
+     */
+    public static boolean initCustomDriver(String browser, boolean headless, boolean incognito) {
+        return initDriverInternal(browser, headless, incognito);
+    }
+
+    private static boolean initDriverInternal(String browser, boolean headless, boolean incognito) {
         validateBrowser(browser);
 
         String browserName = browser.trim().toLowerCase(Locale.ROOT);
@@ -100,7 +163,7 @@ public final class DriverFactory {
         }
 
         // 1. Create the raw browser (all tuning is passed as options: zero extra commands)
-        WebDriver rawDriver = createDriver(browser, headless, incognito);
+        WebDriver rawDriver = createDriver(browserName, headless, incognito);
 
         // Only the cases that --start-maximized can't cover need a WebDriver command
         if (!headless && (IS_MAC || "firefox".equals(browserName))) {
