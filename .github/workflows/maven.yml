@@ -1,100 +1,78 @@
-name: Hybrid Selenium TestNG & Cucumber CI
+name: Kill Bill Automation CI
 
 on:
   workflow_dispatch:
     inputs:
       framework:
-        description: 'Test Framework to Execute'
-        required: true
+        description: "Test framework to execute"
         type: choice
-        default: 'TestNG'
+        required: true
+        default: "TestNG"
         options:
-          - 'TestNG'
-          - 'Cucumber BDD'
+          - "TestNG"
+          - "Cucumber BDD"
 
       browser:
-        description: 'Target Browser'
-        required: true
+        description: "Target browser"
         type: choice
-        default: 'Chrome'
+        required: true
+        default: "Chrome"
         options:
-          - 'Chrome'
-          - 'Firefox'
-          - 'Edge'
-          - 'All'
+          - "Chrome"
+          - "Firefox"
+          - "Edge"
+          - "All"
 
-      browser_mode:
-        description: 'Browser Mode'
+      headless:
+        description: "Browser mode: Checked = Headless | Unchecked = Headed"
+        type: boolean
         required: true
-        type: choice
-        default: 'Headless'
-        options:
-          - 'Headless'
-          - 'Headed'
+        default: true
 
-      execution_mode:
-        description: 'Browser Session Mode'
+      incognito:
+        description: "Execution mode: Checked = Incognito | Unchecked = Normal"
+        type: boolean
         required: true
-        type: choice
-        default: 'Incognito'
-        options:
-          - 'Normal'
-          - 'Incognito'
+        default: false
 
       execution_strategy:
-        description: 'Execution Strategy'
-        required: true
+        description: "Execution strategy"
         type: choice
-        default: 'Serial'
+        required: true
+        default: "Serial"
         options:
-          - 'Serial'
-          - 'Parallel'
+          - "Serial"
+          - "Parallel"
 
       thread_count:
-        description: 'Parallel Thread Count (used when Execution Strategy is Parallel)'
-        required: false
+        description: "Parallel thread count (used when strategy is Parallel)"
         type: string
-        default: '2'
-
-      test_class:
-        description: 'Optional: Fully qualified class name (TestNG: tests.Create_Account | BDD: stepdefinitions.CreateAccount or feature path). Leave blank for full suite.'
         required: false
+        default: "2"
+
+      testng_class:
+        description: "Individual TestNG class under src\\test\\java\\tests (e.g., tests.Login_Test). Leave blank for full suite."
         type: string
-        default: ''
-
-      use_bdd_runner_class:
-        description: 'Cucumber BDD only: Run via Runner class (runners.TestRunner / runners.ParallelTestRunner) instead of bdd-*.xml'
         required: false
-        type: boolean
-        default: false
+        default: ""
 
-      block_images:
-        description: 'DriverFactory optimization: Block image downloads (-DBLOCK_IMAGES=true)'
+      bdd_steps_class:
+        description: "Individual Cucumber steps class under src\\test\\java\\stepdefinitions (e.g., stepdefinitions.LoginSteps). Leave blank for full suite."
+        type: string
         required: false
-        type: boolean
-        default: false
+        default: ""
 
-      runner:
-        description: 'Runner Environment (ubuntu-latest for GitHub-hosted Linux Docker, self-hosted for your Windows 11 + Docker Desktop machine)'
-        required: true
-        type: choice
-        default: 'ubuntu-latest'
-        options:
-          - 'ubuntu-latest'
-          - 'self-hosted'
-          - 'windows-latest'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # ===========================================================================
-  # 1. PREPARE BROWSER MATRIX (Handles Single Browser or "All")
-  # ===========================================================================
   prepare:
-    name: Prepare Execution Matrix
     runs-on: ubuntu-latest
     outputs:
       browsers: ${{ steps.set-matrix.outputs.browsers }}
     steps:
-      - name: Resolve Target Browsers
+      - name: Resolve browser matrix
         id: set-matrix
         shell: pwsh
         env:
@@ -102,463 +80,245 @@ jobs:
         run: |
           $selected = $env:SELECTED_BROWSER.Trim().ToLowerInvariant()
           if ($selected -eq 'all') {
-            $matrix = '["chrome","firefox","edge"]'
+            $browsers = @('chrome', 'firefox', 'edge')
           } else {
-            $matrix = "[\"$selected\"]"
+            $browsers = @($selected)
           }
-          "browsers=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          $matrix = ConvertTo-Json -InputObject $browsers -Compress
+          "browsers=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
           Write-Host "Resolved browser matrix: $matrix"
 
-  # ===========================================================================
-  # 2. DOCKER + MAVEN TEST EXECUTION + REPORT ARTIFACTS
-  # ===========================================================================
-  execute-tests:
-    name: ${{ inputs.framework }} | ${{ matrix.browser }} | ${{ inputs.execution_strategy }}
+  automation-tests:
     needs: prepare
-    runs-on: ${{ inputs.runner }}
-    timeout-minutes: 60
+    # Linux containers in docker-compose.yml require ubuntu-latest on GitHub-hosted runners.
+    # If running on a local Windows 11 runner with Docker Desktop (WSL2), switch to: [self-hosted, windows]
+    runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix:
-        browser: ${{ fromJSON(needs.prepare.outputs.browsers) }}
+        browser: ${{ fromJson(needs.prepare.outputs.browsers) }}
 
     defaults:
       run:
         shell: pwsh
 
+    env:
+      API_BASE_URL: ${{ secrets.API_BASE_URL }}
+      BASE_URL: ${{ secrets.BASE_URL }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_URL: ${{ secrets.DB_URL }}
+      DB_USERNAME: ${{ secrets.DB_USERNAME }}
+      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
+      LOGIN_USERNAME: ${{ secrets.LOGIN_USERNAME }}
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17 with Maven Dependency Cache
+      - name: Set up JDK 17 and cache Maven dependencies
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
-          cache: 'maven'
+          java-version: "17"
+          distribution: "temurin"
+          cache: "maven"
 
-      # -----------------------------------------------------------------------
-      # Bind Configured GitHub Secrets/Variables into Env & src/main/java/env/.env
-      # -----------------------------------------------------------------------
-      - name: Configure Environment Variables & .env File
-        env:
-          API_BASE_URL: ${{ secrets.API_BASE_URL || vars.API_BASE_URL }}
-          BASE_URL: ${{ secrets.BASE_URL || vars.BASE_URL }}
-          DB_URL: ${{ secrets.DB_URL || vars.DB_URL }}
-          DB_USERNAME: ${{ secrets.DB_USERNAME || vars.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD || vars.DB_PASSWORD }}
-          LOGIN_USERNAME: ${{ secrets.LOGIN_USERNAME || vars.LOGIN_USERNAME }}
-          LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD || vars.LOGIN_PASSWORD }}
+      - name: Start Docker containers (Kill Bill, Kaui, MariaDB)
         run: |
-          $requiredKeys = @(
-            'API_BASE_URL',
-            'BASE_URL',
-            'DB_URL',
-            'DB_USERNAME',
-            'DB_PASSWORD',
-            'LOGIN_USERNAME',
-            'LOGIN_PASSWORD'
-          )
-
-          $missing = @()
-          foreach ($key in $requiredKeys) {
-            $val = [Environment]::GetEnvironmentVariable($key)
-            if ([string]::IsNullOrWhiteSpace($val)) {
-              $missing += $key
-            }
-          }
-
-          if ($missing.Count -gt 0) {
-            throw "Missing required GitHub Secrets/Variables: $($missing -join ', ')"
-          }
-
-          $envFilePath = Join-Path (Get-Location).Path (Join-Path "src" (Join-Path "main" (Join-Path "java" (Join-Path "env" ".env"))))
-          $envBackupPath = "$envFilePath.ci.bak"
-          $envDir = Split-Path -Path $envFilePath -Parent
-          if (-not (Test-Path $envDir)) {
-            New-Item -ItemType Directory -Path $envDir -Force | Out-Null
-          }
-
-          $existingLines = @()
-          if (Test-Path $envFilePath) {
-            Copy-Item -Path $envFilePath -Destination $envBackupPath -Force
-            "RESTORE_ENV_FILE=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            $existingLines = Get-Content -Path $envFilePath -ErrorAction SilentlyContinue
-          } else {
-            "GENERATED_ENV_FILE=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          }
-
-          $managedSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-          foreach ($k in $requiredKeys) { [void]$managedSet.Add($k) }
-
-          $outputLines = New-Object System.Collections.Generic.List[string]
-          foreach ($line in $existingLines) {
-            if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=') {
-              if ($managedSet.Contains($Matches[1])) {
-                continue
-              }
-            }
-            $outputLines.Add($line)
-          }
-
-          foreach ($key in $requiredKeys) {
-            $val = [Environment]::GetEnvironmentVariable($key)
-            "$key=$val" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            $outputLines.Add("$key=$val")
-          }
-
-          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-          [System.IO.File]::WriteAllLines($envFilePath, $outputLines, $utf8NoBom)
-
-          Write-Host "Validated and configured all 7 environment variables."
-
-      # -----------------------------------------------------------------------
-      # Start Kill Bill + KAUI + MariaDB Using Root docker-compose.yml
-      # -----------------------------------------------------------------------
-      - name: Start Kill Bill Docker Containers
-        run: |
-          if (-not (Test-Path "docker-compose.yml")) {
-            throw "docker-compose.yml not found at repository root."
-          }
-
-          if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-            throw "Docker CLI is not installed or not in PATH on this runner."
-          }
-
-          $dockerOs = (docker info --format '{{.OSType}}' 2>&1)
-          if ($LASTEXITCODE -ne 0) {
-            throw "Docker daemon is not running: $dockerOs"
-          }
-          Write-Host "Docker Engine OS Type: $dockerOs"
-          if ($dockerOs.Trim().ToLowerInvariant() -ne 'linux') {
-            throw "Kill Bill, KAUI, and MariaDB require Linux Docker containers, but this runner is running '$dockerOs' containers. Select 'ubuntu-latest' (GitHub-hosted) or 'self-hosted' (Windows 11 + Docker Desktop Linux mode)."
-          }
-
-          "DOCKER_STARTED=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          Write-Host "Starting Kill Bill, KAUI, and MariaDB containers..."
           docker compose -f docker-compose.yml up -d
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to start Docker Compose stack."
-          }
 
-      - name: Wait for MariaDB, Kill Bill, and KAUI Readiness
-        run: |
+          Write-Host "Waiting for Kill Bill (8080) and Kaui (9090) to become ready..."
           $maxAttempts = 60
           $sleepSeconds = 5
-          $dbReady = $false
-          $kbReady = $false
-          $kauiReady = $false
 
+          function Test-EndpointReady([string]$Url) {
+            try {
+              $resp = Invoke-WebRequest -Uri $Url -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction Stop
+              return ([int]$resp.StatusCode -ge 200 -and [int]$resp.StatusCode -lt 400)
+            } catch {
+              if ($_.Exception.Response) {
+                $code = [int]$_.Exception.Response.StatusCode
+                return ($code -ge 200 -and $code -lt 400)
+              }
+              return $false
+            }
+          }
+
+          $ready = $false
           for ($i = 1; $i -le $maxAttempts; $i++) {
-            if (-not $dbReady) {
-              try {
-                $tcp = New-Object System.Net.Sockets.TcpClient
-                $async = $tcp.BeginConnect("127.0.0.1", 3307, $null, $null)
-                if ($async.AsyncWaitHandle.WaitOne(2000, $false) -and $tcp.Connected) {
-                  $dbReady = $true
-                  Write-Host "[Attempt $i] MariaDB port 3307 is reachable."
-                }
-                $tcp.Close()
-              } catch { }
+            $kbReady = Test-EndpointReady "http://localhost:8080/1.0/healthcheck"
+            $kauiReady = Test-EndpointReady "http://localhost:9090"
+
+            if ($kbReady -and $kauiReady) {
+              Write-Host "Services are ready (attempt $i/$maxAttempts)."
+              $ready = $true
+              break
             }
 
-            if (-not $kbReady) {
-              try {
-                $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8080/1.0/healthcheck" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-                if ($resp.StatusCode -eq 200) {
-                  $kbReady = $true
-                  Write-Host "[Attempt $i] Kill Bill healthcheck returned 200."
-                }
-              } catch { }
-            }
-
-            if (-not $kauiReady) {
-              try {
-                $resp = Invoke-WebRequest -Uri "http://127.0.0.1:9090" -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 5 -ErrorAction Stop
-                if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400) {
-                  $kauiReady = $true
-                  Write-Host "[Attempt $i] KAUI returned $($resp.StatusCode)."
-                }
-              } catch { }
-            }
-
-            if ($dbReady -and $kbReady -and $kauiReady) {
-              Write-Host "All services (MariaDB, Kill Bill, KAUI) are ready."
-              exit 0
-            }
-
-            Write-Host "[Attempt $i/$maxAttempts] Waiting... (DB=$dbReady, KillBill=$kbReady, KAUI=$kauiReady)"
+            Write-Host "Attempt $i/$maxAttempts - KillBill: $kbReady | Kaui: $kauiReady"
             Start-Sleep -Seconds $sleepSeconds
           }
 
-          Write-Host "::error::Timed out waiting for Kill Bill stack readiness."
-          docker compose -f docker-compose.yml ps
-          docker compose -f docker-compose.yml logs --tail=100
-          exit 1
+          if (-not $ready) {
+            Write-Error "Docker services did not become ready in time."
+            docker compose -f docker-compose.yml ps
+            docker compose -f docker-compose.yml logs --tail=100
+            exit 1
+          }
 
-      # -----------------------------------------------------------------------
-      # Execute Selected Framework (TestNG OR Cucumber BDD Only)
-      # -----------------------------------------------------------------------
-      - name: Execute Automated Tests
+      - name: Run Selected Automation Suite
         env:
-          FRAMEWORK: ${{ inputs.framework }}
-          BROWSER: ${{ matrix.browser }}
-          BROWSER_MODE: ${{ inputs.browser_mode }}
-          EXECUTION_MODE: ${{ inputs.execution_mode }}
-          EXECUTION_STRATEGY: ${{ inputs.execution_strategy }}
-          THREAD_COUNT: ${{ inputs.thread_count }}
-          TEST_CLASS: ${{ inputs.test_class }}
-          USE_BDD_RUNNER_CLASS: ${{ inputs.use_bdd_runner_class }}
-          BLOCK_IMAGES: ${{ inputs.block_images }}
+          INPUT_FRAMEWORK: ${{ inputs.framework }}
+          MATRIX_BROWSER: ${{ matrix.browser }}
+          INPUT_HEADLESS: ${{ inputs.headless }}
+          INPUT_INCOGNITO: ${{ inputs.incognito }}
+          INPUT_STRATEGY: ${{ inputs.execution_strategy }}
+          INPUT_THREADS: ${{ inputs.thread_count }}
+          INPUT_TESTNG_CLASS: ${{ inputs.testng_class }}
+          INPUT_BDD_CLASS: ${{ inputs.bdd_steps_class }}
         run: |
-          $framework = $env:FRAMEWORK.Trim()
-          $browser = $env:BROWSER.Trim().ToLowerInvariant()
-          $headless = ($env:BROWSER_MODE.Trim().ToLowerInvariant() -eq 'headless').ToString().ToLowerInvariant()
-          $incognito = ($env:EXECUTION_MODE.Trim().ToLowerInvariant() -eq 'incognito').ToString().ToLowerInvariant()
-          $isParallel = ($env:EXECUTION_STRATEGY.Trim().ToLowerInvariant() -eq 'parallel')
-          $useBddRunnerClass = ($env:USE_BDD_RUNNER_CLASS -eq 'true')
-          $blockImages = ($env:BLOCK_IMAGES -eq 'true')
-          $rawTestClass = if ($null -ne $env:TEST_CLASS) { $env:TEST_CLASS.Trim() } else { '' }
+          $ErrorActionPreference = "Stop"
 
-          $parsedThreads = 1
+          $browser   = $env:MATRIX_BROWSER.Trim().ToLowerInvariant()
+          $headless  = $env:INPUT_HEADLESS.Trim().ToLowerInvariant()
+          $incognito = $env:INPUT_INCOGNITO.Trim().ToLowerInvariant()
+          $strategy  = $env:INPUT_STRATEGY.Trim().ToLowerInvariant()
+
+          # 1. Resolve parallelism settings mapped to pom.xml properties
+          $isParallel = ($strategy -eq "parallel")
+          $threadCount = 1
           if ($isParallel) {
-            if ([int]::TryParse($env:THREAD_COUNT, [ref]$parsedThreads) -and $parsedThreads -ge 1) {
-              # valid
-            } else {
-              $parsedThreads = 2
+            if (-not [int]::TryParse($env:INPUT_THREADS, [ref]$threadCount) -or $threadCount -lt 1) {
+              throw "Invalid thread_count '$($env:INPUT_THREADS)'. Provide a positive integer."
             }
           }
+          $mavenParallelMode = if ($isParallel) { "classes" } else { "none" }
 
-          $surefireParallel = if ($isParallel) { 'classes' } else { 'none' }
+          # 2. Resolve framework execution target (full suite XML vs individual class)
+          $testngClass = $env:INPUT_TESTNG_CLASS.Trim()
+          $bddClass    = $env:INPUT_BDD_CLASS.Trim()
+          $targetArgs  = @()
 
-          $mvnArgs = New-Object System.Collections.Generic.List[string]
-          $mvnArgs.Add("test")
-          $mvnArgs.Add("-B")
-          $mvnArgs.Add("-Dbrowser=$browser")
-          $mvnArgs.Add("-Dheadless=$headless")
-          $mvnArgs.Add("-Dincognito=$incognito")
-          $mvnArgs.Add("-Dexecution.mode=$surefireParallel")
-          $mvnArgs.Add("-Dthread.count=$parsedThreads")
-          $mvnArgs.Add("-Ddataprovider.thread.count=$parsedThreads")
-
-          $jvmArgLine = New-Object System.Collections.Generic.List[string]
-          if ($blockImages) {
-            $jvmArgLine.Add("-DBLOCK_IMAGES=true")
-          }
-
-          function Normalize-ClassName([string]$inputVal) {
-            $val = $inputVal.Trim()
-            $val = $val -replace '^src[\\/]+test[\\/]+java[\\/]+', ''
-            $val = $val -replace '\.java$', ''
-            $val = $val -replace '[\\/]+', '.'
-            return $val
-          }
-
-          function Use-SuiteXml([string]$suiteFile) {
-            if (-not (Test-Path $suiteFile)) {
-              throw "Expected suite XML file not found: $suiteFile"
-            }
-            if (-not (Test-Path "testng.xml")) {
-              "GENERATED_TESTNG_XML=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            }
-            Copy-Item -Path $suiteFile -Destination "testng.xml" -Force
-            $mvnArgs.Add("-Dsurefire.suiteXmlFiles=$suiteFile")
-            Write-Host "Using suite XML: $suiteFile"
-          }
-
-          if ($framework -eq 'TestNG') {
-            Write-Host "=== Framework: TestNG ==="
-            if (-not [string]::IsNullOrWhiteSpace($rawTestClass)) {
-              $fqn = Normalize-ClassName $rawTestClass
-              $javaRelPath = Join-Path "src" (Join-Path "test" (Join-Path "java" (($fqn -replace '\.', [IO.Path]::DirectorySeparatorChar) + ".java")))
-              if (-not (Test-Path $javaRelPath)) {
-                $available = (Get-ChildItem -Path "src/test/java/tests" -Filter "*.java" -ErrorAction SilentlyContinue | ForEach-Object { "tests.$($_.BaseName)" }) -join ", "
-                throw "TestNG class '$fqn' not found at '$javaRelPath'. Available classes in src/test/java/tests: $available"
+          if ($env:INPUT_FRAMEWORK -eq "TestNG") {
+            if ($testngClass) {
+              $classFile = "src/test/java/$($testngClass -replace '\.', '/').java"
+              if (-not (Test-Path $classFile)) {
+                throw "TestNG class '$testngClass' not found at '$classFile'."
               }
-              $mvnArgs.Add("-Dtest=$fqn")
-              $mvnArgs.Add("-DfailIfNoTests=true")
-              Write-Host "Running individual TestNG class: $fqn"
+              Write-Host "Mode: Individual TestNG Class -> $testngClass"
+              $targetArgs += "-Dtest=$testngClass"
             } else {
               $suiteXml = if ($isParallel) { "testng-parallel.xml" } else { "testng-serial.xml" }
-              Use-SuiteXml $suiteXml
+              Write-Host "Mode: TestNG Full Suite -> $suiteXml"
+              Copy-Item -Path $suiteXml -Destination "testng.xml" -Force
             }
           }
-          elseif ($framework -eq 'Cucumber BDD') {
-            Write-Host "=== Framework: Cucumber BDD ==="
-            $runnerClass = if ($isParallel) { "runners.ParallelTestRunner" } else { "runners.TestRunner" }
-
-            if (-not [string]::IsNullOrWhiteSpace($rawTestClass)) {
-              if ($rawTestClass -match '\.feature$') {
-                $featurePath = $rawTestClass -replace '\\', '/'
-                if (-not (Test-Path $featurePath)) {
-                  $candidate = "src/test/resources/features/$featurePath"
-                  if (Test-Path $candidate) { $featurePath = $candidate }
-                }
-                if (-not (Test-Path $featurePath)) {
-                  throw "Feature file not found: $featurePath"
-                }
-                $mvnArgs.Add("-Dtest=$runnerClass")
-                $mvnArgs.Add("-DfailIfNoTests=true")
-                $jvmArgLine.Add("-Dcucumber.features=$featurePath")
-                Write-Host "Running Cucumber feature '$featurePath' via $runnerClass"
-              } else {
-                $fqn = Normalize-ClassName $rawTestClass
-                $javaRelPath = Join-Path "src" (Join-Path "test" (Join-Path "java" (($fqn -replace '\.', [IO.Path]::DirectorySeparatorChar) + ".java")))
-                if (-not (Test-Path $javaRelPath)) {
-                  $available = (Get-ChildItem -Path "src/test/java/stepdefinitions" -Filter "*.java" -ErrorAction SilentlyContinue | ForEach-Object { "stepdefinitions.$($_.BaseName)" }) -join ", "
-                  throw "Step definition class '$fqn' not found at '$javaRelPath'. Available classes in src/test/java/stepdefinitions: $available"
-                }
-
-                $javaContent = Get-Content -Path $javaRelPath -Raw
-                $hasCucumberSteps = $javaContent -match '@(Given|When|Then|And|But)\s*\('
-                $hasTestNgTest = $javaContent -match '@Test\b'
-
-                if ($hasTestNgTest -and -not $hasCucumberSteps) {
-                  $mvnArgs.Add("-Dtest=$fqn")
-                  $mvnArgs.Add("-DfailIfNoTests=true")
-                  Write-Host "Class '$fqn' contains TestNG @Test methods without Cucumber annotations. Executing directly."
-                } else {
-                  $featureFiles = Get-ChildItem -Path "src/test/resources/features" -Filter "*.feature" -Recurse
-                  $simpleName = ($fqn -split '\.')[-1]
-                  $stemNoSteps = $simpleName -replace 'Steps$', ''
-
-                  $matchedFeatures = $featureFiles | Where-Object {
-                    $_.BaseName -ieq $simpleName -or $_.BaseName -ieq $stemNoSteps
-                  }
-
-                  if ($matchedFeatures.Count -eq 0) {
-                    $stepMatches = [regex]::Matches($javaContent, '@(?:Given|When|Then|And|But)\s*\(\s*"([^"]+)"')
-                    $stepPatterns = @()
-                    foreach ($m in $stepMatches) {
-                      $expr = $m.Groups[1].Value -replace '^\^', '' -replace '\$$', ''
-                      $loose = [regex]::Escape($expr)
-                      $loose = $loose -replace '\\\{[^\}]+\\\}', '.*'
-                      $loose = $loose -replace '\\\([^\)]+\\\)', '.*'
-                      if ($loose.Length -ge 6) {
-                        $stepPatterns += $loose
-                      }
-                    }
-
-                    $scored = @()
-                    foreach ($ff in $featureFiles) {
-                      $fContent = Get-Content -Path $ff.FullName -Raw
-                      $hits = 0
-                      foreach ($pat in $stepPatterns) {
-                        if ($fContent -match $pat) { $hits++ }
-                      }
-                      if ($hits -gt 0) {
-                        $scored += [PSCustomObject]@{ File = $ff; Hits = $hits }
-                      }
-                    }
-
-                    if ($scored.Count -gt 0) {
-                      $maxHits = ($scored | Measure-Object -Property Hits -Maximum).Maximum
-                      $matchedFeatures = ($scored | Where-Object { $_.Hits -eq $maxHits }).File
-                    }
-                  }
-
-                  if ($matchedFeatures.Count -eq 0) {
-                    $availableFeatures = ($featureFiles | ForEach-Object { $_.Name }) -join ", "
-                    throw "Could not match step definition class '$fqn' to a feature file. Available features: $availableFeatures. You may also enter the .feature file path directly."
-                  }
-
-                  $featureArg = ($matchedFeatures | ForEach-Object {
-                    $rel = [IO.Path]::GetRelativePath((Get-Location).Path, $_.FullName)
-                    $rel -replace '\\', '/'
-                  }) -join ","
-
-                  $mvnArgs.Add("-Dtest=$runnerClass")
-                  $mvnArgs.Add("-DfailIfNoTests=true")
-                  $jvmArgLine.Add("-Dcucumber.features=$featureArg")
-                  Write-Host "Mapped step definition class '$fqn' -> feature(s): $featureArg"
-                  Write-Host "Running via $runnerClass"
-                }
+          elseif ($env:INPUT_FRAMEWORK -eq "Cucumber BDD") {
+            if ($bddClass) {
+              $stepFile = "src/test/java/$($bddClass -replace '\.', '/').java"
+              if (-not (Test-Path $stepFile)) {
+                throw "Cucumber steps class '$bddClass' not found at '$stepFile'."
               }
+
+              $simpleName = ($bddClass -split '\.')[-1]
+              $allFeatures = Get-ChildItem -Path "src/test/resources/features" -Filter "*.feature"
+
+              # Priority 1: Exact case-insensitive filename match (e.g., CreateAccount -> CreateAccount.feature)
+              $matched = @($allFeatures | Where-Object { $_.BaseName -ieq $simpleName })
+
+              # Priority 2: Normalized match removing '_' and trailing 'Steps' (e.g., LoginSteps -> Login.feature)
+              if ($matched.Count -eq 0) {
+                $normClass = ($simpleName -replace 'Steps$', '' -replace '_', '').ToLowerInvariant()
+                $matched = @($allFeatures | Where-Object {
+                  ($_.BaseName -replace '_', '').ToLowerInvariant() -eq $normClass
+                })
+              }
+
+              # Priority 3: Match @Given/@When/@Then/@And step phrases inside the step-def class
+              if ($matched.Count -eq 0) {
+                $stepSource = Get-Content -Path $stepFile -Raw
+                $phrases = [regex]::Matches($stepSource, '@(?:Given|When|Then|And|But)\s*\(\s*"([^"{(]+)') |
+                  ForEach-Object { $_.Groups[1].Value.Trim() } |
+                  Where-Object { $_.Length -ge 8 } |
+                  Select-Object -Unique
+
+                $matched = @($allFeatures | Where-Object {
+                  $content = Get-Content -Path $_.FullName -Raw
+                  foreach ($p in $phrases) {
+                    if ($content -match [regex]::Escape($p)) { return $true }
+                  }
+                  return $false
+                })
+
+                $dedicated = @($matched | Where-Object { $_.BaseName -ine "KillBillExecution" })
+                if ($dedicated.Count -gt 0) { $matched = $dedicated }
+              }
+
+              if ($matched.Count -eq 0) {
+                throw "No matching .feature file found in src/test/resources/features for '$bddClass'."
+              }
+
+              $featureList = ($matched | ForEach-Object { "classpath:features/$($_.Name)" }) -join ","
+              $bddRunner = if ($isParallel) { "runners.ParallelTestRunner" } else { "runners.TestRunner" }
+
+              Write-Host "Mode: Individual BDD Steps -> $bddClass"
+              Write-Host "Runner: $bddRunner | Features: $featureList"
+              $targetArgs += "-Dtest=$bddRunner"
+              $targetArgs += "-Dcucumber.features=$featureList"
             } else {
-              if ($useBddRunnerClass) {
-                $mvnArgs.Add("-Dtest=$runnerClass")
-                $mvnArgs.Add("-DfailIfNoTests=true")
-                Write-Host "Running Cucumber BDD Runner class: $runnerClass"
-              } else {
-                $suiteXml = if ($isParallel) { "bdd-parallel.xml" } else { "bdd-serial.xml" }
-                Use-SuiteXml $suiteXml
-              }
+              $suiteXml = if ($isParallel) { "bdd-parallel.xml" } else { "bdd-serial.xml" }
+              Write-Host "Mode: Cucumber BDD Full Suite -> $suiteXml"
+              Copy-Item -Path $suiteXml -Destination "testng.xml" -Force
             }
           }
-          else {
-            throw "Unsupported framework selection: $framework"
+
+          Write-Host "============================================================"
+          Write-Host "Executing $($env:INPUT_FRAMEWORK) | Browser: $browser | Headless: $headless | Incognito: $incognito | Strategy: $strategy (Threads: $threadCount)"
+          Write-Host "============================================================"
+
+          $mvnArgs = @(
+            "test",
+            "--batch-mode",
+            "-Dbrowser=$browser",
+            "-Dheadless=$headless",
+            "-Dincognito=$incognito",
+            "-Dexecution.mode=$mavenParallelMode",
+            "-Dthread.count=$threadCount",
+            "-Ddataprovider.thread.count=$threadCount"
+          ) + $targetArgs
+
+          & mvn @mvnArgs
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
           }
 
-          if ($jvmArgLine.Count -gt 0) {
-            $mvnArgs.Add("-DargLine=$($jvmArgLine -join ' ')")
-          }
-
-          Write-Host "Executing: mvn $($mvnArgs -join ' ')"
-
-          if ($IsLinux -and $headless -eq 'false' -and (Get-Command xvfb-run -ErrorAction SilentlyContinue)) {
-            & xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" mvn @mvnArgs
-          } else {
-            & mvn @mvnArgs
-          }
-
-          $exitCode = $LASTEXITCODE
-          Write-Host "Maven exited with code: $exitCode"
-          exit $exitCode
-
-      # -----------------------------------------------------------------------
-      # Upload Separate Artifacts (Always Runs Even on Test Failure)
-      # -----------------------------------------------------------------------
-      - name: Upload TestNG Dashboard & Reports
+      - name: Upload TestNG Report Artifact
         if: always() && inputs.framework == 'TestNG'
         uses: actions/upload-artifact@v4
         with:
-          name: testng-reports-${{ matrix.browser }}
+          name: testng-report-${{ matrix.browser }}-${{ inputs.execution_strategy }}
           path: |
+            test-output/dashboard/ExecutionDashboard.html
             test-output/
-            target/surefire-reports/
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload Cucumber HTML & JSON Reports
+      - name: Upload Cucumber HTML & JSON Report Artifact
         if: always() && inputs.framework == 'Cucumber BDD'
         uses: actions/upload-artifact@v4
         with:
-          name: cucumber-reports-${{ matrix.browser }}
+          name: cucumber-report-${{ matrix.browser }}-${{ inputs.execution_strategy }}
           path: |
             target/cucumber-reports/cucumber.html
             target/cucumber-reports/cucumber.json
           if-no-files-found: warn
           retention-days: 14
 
-      # -----------------------------------------------------------------------
-      # Capture Docker Logs on Failure & Always Tear Down Containers
-      # -----------------------------------------------------------------------
-      - name: Dump Docker Logs on Failure
-        if: failure() && env.DOCKER_STARTED == 'true'
-        run: |
-          if (Test-Path "docker-compose.yml") {
-            docker compose -f docker-compose.yml ps
-            docker compose -f docker-compose.yml logs --tail=150
-          }
+      - name: Dump Docker logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml logs --tail=150
 
-      - name: Stop Docker Containers & Clean Temporary CI Files
+      - name: Stop and clean up Docker containers
         if: always()
-        run: |
-          if ($env:DOCKER_STARTED -eq 'true' -and (Test-Path "docker-compose.yml")) {
-            Write-Host "Stopping and removing Kill Bill Docker containers and volumes..."
-            docker compose -f docker-compose.yml down -v --remove-orphans
-          }
-
-          if ($env:GENERATED_TESTNG_XML -eq 'true' -and (Test-Path "testng.xml")) {
-            Remove-Item -Path "testng.xml" -Force -ErrorAction SilentlyContinue
-          }
-
-          $envFilePath = Join-Path (Get-Location).Path (Join-Path "src" (Join-Path "main" (Join-Path "java" (Join-Path "env" ".env"))))
-          $envBackupPath = "$envFilePath.ci.bak"
-
-          if ($env:RESTORE_ENV_FILE -eq 'true' -and (Test-Path $envBackupPath)) {
-            Move-Item -Path $envBackupPath -Destination $envFilePath -Force
-          } elseif ($env:GENERATED_ENV_FILE -eq 'true' -and (Test-Path $envFilePath)) {
-            Remove-Item -Path $envFilePath -Force -ErrorAction SilentlyContinue
-          }
+        run: docker compose -f docker-compose.yml down -v --remove-orphans
