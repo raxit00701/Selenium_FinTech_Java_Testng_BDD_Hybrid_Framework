@@ -1,32 +1,28 @@
+version: '3.2'
+
 volumes:
   db:
 
 services:
+
   killbill:
     image: killbill/killbill:0.24.16
-    depends_on:
-      - db
-    restart: on-failure
     ports:
       - "8080:8080"
     environment:
       - KILLBILL_DAO_URL=jdbc:mysql://db:3306/killbill
-      - KILLBILL_DAO_USER=${DB_USERNAME:?DB_USERNAME is required}
-      - KILLBILL_DAO_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
+      - KILLBILL_DAO_USER=${DB_USERNAME:-root}
+      - KILLBILL_DAO_PASSWORD=${DB_PASSWORD:-killbill}
       - KILLBILL_CATALOG_URI=SpyCarAdvanced.xml
 
   kaui:
     image: killbill/kaui:4.0.4
-    depends_on:
-      - db
-      - killbill
-    restart: on-failure
     ports:
       - "9090:8080"
     environment:
       - KAUI_CONFIG_DAO_URL=jdbc:mysql://db:3306/kaui
-      - KAUI_CONFIG_DAO_USER=${DB_USERNAME:?DB_USERNAME is required}
-      - KAUI_CONFIG_DAO_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
+      - KAUI_CONFIG_DAO_USER=${DB_USERNAME:-root}
+      - KAUI_CONFIG_DAO_PASSWORD=${DB_PASSWORD:-killbill}
       - KAUI_KILLBILL_URL=http://killbill:8080
 
   db:
@@ -40,4 +36,4 @@ services:
     expose:
       - "3306"
     environment:
-      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-killbill}
