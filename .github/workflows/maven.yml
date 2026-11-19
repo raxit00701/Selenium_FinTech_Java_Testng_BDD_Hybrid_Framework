@@ -1,14 +1,15 @@
-name: Selenium TestNG & BDD CI
+name: Kill Bill Selenium CI (TestNG & BDD)
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
     inputs:
-      suite:
-        description: 'Suite to run (ignored if Single Test Class is provided)'
+      suite_type:
+        description: 'Execution Suite Flow (TestNG / BDD - Serial / Parallel)'
+        required: true
         type: choice
         default: 'testng-serial'
         options:
@@ -17,117 +18,340 @@ on:
           - bdd-serial
           - bdd-parallel
       test_class:
-        description: 'Optional: Run any single class independently (e.g., tests.LoginTest or runners.TestRunner)'
-        type: string
+        description: 'Optional: Specific TestNG/BDD Class Name (e.g., Login_validation, Create_Subs, TestRunner, ParallelTestRunner). Leave empty to run full suite XML.'
         required: false
+        type: string
         default: ''
       browser:
-        description: 'Browser (matches DriverFactory)'
+        description: 'Browser Selection (DriverFactory: chrome, edge, firefox, or all)'
+        required: true
         type: choice
         default: 'chrome'
         options:
           - chrome
           - edge
           - firefox
+          - all
       headless:
-        description: 'Run in headless mode'
-        type: boolean
-        default: true
+        description: 'Headless Mode (true = CI Headless, false = Headed UI)'
+        required: true
+        type: choice
+        default: 'true'
+        options:
+          - 'true'
+          - 'false'
       incognito:
-        description: 'Run in incognito/private mode'
-        type: boolean
-        default: false
-      block_images:
-        description: 'Block images for faster loads (-DBLOCK_IMAGES)'
-        type: boolean
-        default: false
+        description: 'Incognito / Private Mode'
+        required: false
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+      thread_count:
+        description: 'Parallel Thread Count (used when running parallel suites)'
+        required: false
+        type: string
+        default: '4'
+      dataprovider_thread_count:
+        description: 'DataProvider / Scenario Parallel Thread Count'
+        required: false
+        type: string
+        default: '3'
+
+defaults:
+  run:
+    shell: pwsh
 
 jobs:
-  run-tests:
-    # 'self-hosted' runs on your local Windows 11 machine where Docker is already running.
-    # Change to 'windows-latest' only if your BASE_URL / API_BASE_URL / DB_URL are publicly reachable.
-    runs-on: self-hosted
+  selenium-ci-execution:
+    name: ${{ github.event.inputs.suite_type || 'testng-serial' }} | ${{ matrix.browser }}
+    runs-on: windows-latest
 
-    defaults:
-      run:
-        shell: powershell
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: ${{ fromJSON(github.event.inputs.browser == 'all' && '["chrome", "edge", "firefox"]' || format('["{0}"]', github.event.inputs.browser || 'chrome')) }}
 
     env:
-      API_BASE_URL: ${{ vars.API_BASE_URL }}
-      BASE_URL: ${{ vars.BASE_URL }}
-      DB_URL: ${{ vars.DB_URL }}
-      DB_USERNAME: ${{ vars.DB_USERNAME }}
-      DB_PASSWORD: ${{ vars.DB_PASSWORD }}
-      LOGIN_USERNAME: ${{ vars.LOGIN_USERNAME }}
-      LOGIN_PASSWORD: ${{ vars.LOGIN_PASSWORD }}
+      # Existing CI Secrets / Variables
+      BASE_URL: ${{ secrets.BASE_URL || vars.BASE_URL }}
+      API_BASE_URL: ${{ secrets.API_BASE_URL || vars.API_BASE_URL }}
+      LOGIN_USERNAME: ${{ secrets.LOGIN_USERNAME || vars.LOGIN_USERNAME }}
+      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD || vars.LOGIN_PASSWORD }}
+      DB_URL: ${{ secrets.DB_URL || vars.DB_URL }}
+      DB_USERNAME: ${{ secrets.DB_USERNAME || vars.DB_USERNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD || vars.DB_PASSWORD }}
+
+      # Dynamic Execution Inputs
+      INPUT_SUITE_TYPE: ${{ github.event.inputs.suite_type || 'testng-serial' }}
+      INPUT_TEST_CLASS: ${{ github.event.inputs.test_class || '' }}
+      INPUT_BROWSER: ${{ matrix.browser }}
+      INPUT_HEADLESS: ${{ github.event.inputs.headless || 'true' }}
+      INPUT_INCOGNITO: ${{ github.event.inputs.incognito || 'false' }}
+      INPUT_THREAD_COUNT: ${{ github.event.inputs.thread_count || '4' }}
+      INPUT_DP_THREAD_COUNT: ${{ github.event.inputs.dataprovider_thread_count || '3' }}
 
     steps:
-      - name: Checkout repository
+      # =========================================================
+      # 1. CHECKOUT REPOSITORY
+      # =========================================================
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Java & cache Maven dependencies
+      # =========================================================
+      # 2. SETUP JAVA 17 & MAVEN CACHE
+      # =========================================================
+      - name: Set up JDK 17 with Maven Cache
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
           java-version: '17'
+          distribution: 'temurin'
           cache: 'maven'
 
-      - name: Run Maven Tests
-        env:
-          SUITE: ${{ inputs.suite || 'testng-serial' }}
-          TEST_CLASS: ${{ inputs.test_class || '' }}
-          BROWSER: ${{ inputs.browser || 'chrome' }}
-          HEADLESS: ${{ inputs.headless != '' && inputs.headless || 'true' }}
-          INCOGNITO: ${{ inputs.incognito != '' && inputs.incognito || 'false' }}
-          BLOCK_IMAGES: ${{ inputs.block_images != '' && inputs.block_images || 'false' }}
+      # =========================================================
+      # 3. CACHE SELENIUM MANAGER & WEBDRIVER BINARIES
+      # =========================================================
+      - name: Cache Selenium Drivers
+        uses: actions/cache@v4
+        with:
+          path: ~\.\cache\selenium
+          key: ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-
+            ${{ runner.os }}-selenium-drivers-
+
+      # =========================================================
+      # 4. VERIFY / INSTALL BROWSERS ON WINDOWS RUNNER
+      # =========================================================
+      - name: Setup & Verify Browser (${{ matrix.browser }})
         run: |
+          Write-Output "::group::Browser Verification & Setup ($env:INPUT_BROWSER)"
+          switch ($env:INPUT_BROWSER.ToLower()) {
+            "chrome" {
+              $chromePaths = @(
+                "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+                "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
+              )
+              $chromeExe = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+              if (-not $chromeExe) {
+                Write-Output "Installing Google Chrome via Chocolatey..."
+                choco install googlechrome -y --no-progress
+                $chromeExe = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+              }
+              $version = (Get-Item $chromeExe).VersionInfo.ProductVersion
+              Write-Output "Google Chrome ready: $version ($chromeExe)"
+            }
+            "edge" {
+              $edgePaths = @(
+                "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+                "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+              )
+              $edgeExe = $edgePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+              if (-not $edgeExe) {
+                Write-Output "Installing Microsoft Edge via Chocolatey..."
+                choco install microsoft-edge -y --no-progress
+                $edgeExe = $edgePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+              }
+              $version = (Get-Item $edgeExe).VersionInfo.ProductVersion
+              Write-Output "Microsoft Edge ready: $version ($edgeExe)"
+            }
+            "firefox" {
+              $ffPaths = @(
+                "$env:ProgramFiles\Mozilla Firefox\firefox.exe",
+                "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe"
+              )
+              $ffExe = $ffPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+              if (-not $ffExe) {
+                Write-Output "Installing Mozilla Firefox via Chocolatey..."
+                choco install firefox -y --no-progress
+                $ffExe = $ffPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+              }
+              $version = (Get-Item $ffExe).VersionInfo.ProductVersion
+              Write-Output "Mozilla Firefox ready: $version ($ffExe)"
+            }
+          }
+          Write-Output "::endgroup::"
+
+      # =========================================================
+      # 5. CONFIGURE RUNTIME .env FROM CI SECRETS / VARIABLES
+      # =========================================================
+      - name: Configure Runtime Environment (.env)
+        run: |
+          Write-Output "::group::Generating src/main/java/env/.env from CI Variables"
+          if ($env:DB_PASSWORD) { Write-Output "::add-mask::$env:DB_PASSWORD" }
+          if ($env:LOGIN_PASSWORD) { Write-Output "::add-mask::$env:LOGIN_PASSWORD" }
+
+          $envDir = "src/main/java/env"
+          if (-not (Test-Path $envDir)) {
+            New-Item -ItemType Directory -Path $envDir -Force | Out-Null
+          }
+
+          $envContent = @(
+            "BASE_URL=$env:BASE_URL",
+            "API_BASE_URL=$env:API_BASE_URL",
+            "LOGIN_USERNAME=$env:LOGIN_USERNAME",
+            "LOGIN_PASSWORD=$env:LOGIN_PASSWORD",
+            "DB_URL=$env:DB_URL",
+            "DB_USERNAME=$env:DB_USERNAME",
+            "DB_PASSWORD=$env:DB_PASSWORD"
+          )
+
+          Set-Content -Path "$envDir/.env" -Value $envContent -Encoding UTF8
+          Write-Output "Runtime .env created successfully (BASE_URL: $env:BASE_URL | DB_URL: $env:DB_URL)"
+          Write-Output "::endgroup::"
+
+      # =========================================================
+      # 6. INSTALL POM DEPENDENCIES & COMPILE TESTS
+      # =========================================================
+      - name: Download POM Dependencies & Compile
+        run: |
+          Write-Output "::group::Maven Dependency Resolution & Test Compilation"
+          mvn dependency:go-offline test-compile -B -Dstyle.color=always
+          Write-Output "::endgroup::"
+
+      # =========================================================
+      # 7. EXECUTE SELENIUM SUITE (TESTNG OR BDD / SERIAL OR PARALLEL)
+      # =========================================================
+      - name: Run Selenium Automation Suite
+        id: run_tests
+        run: |
+          $suiteType = $env:INPUT_SUITE_TYPE.Trim().ToLower()
+          $rawClass = $env:INPUT_TEST_CLASS.Trim()
+          $browser = $env:INPUT_BROWSER.Trim().ToLower()
+          $headless = $env:INPUT_HEADLESS.Trim().ToLower()
+          $incognito = $env:INPUT_INCOGNITO.Trim().ToLower()
+
+          # Map suite_type to XML file, execution.mode, and ThreadLocal thread counts
+          switch ($suiteType) {
+            "testng-serial" {
+              $suiteXml = "testng-serial.xml"
+              $execMode = "none"
+              $threads = "1"
+              $dpThreads = "1"
+            }
+            "testng-parallel" {
+              $suiteXml = "testng-parallel.xml"
+              $execMode = "classes"
+              $threads = $env:INPUT_THREAD_COUNT
+              $dpThreads = $env:INPUT_DP_THREAD_COUNT
+            }
+            "bdd-serial" {
+              $suiteXml = "bdd-serial.xml"
+              $execMode = "none"
+              $threads = "1"
+              $dpThreads = "1"
+            }
+            "bdd-parallel" {
+              $suiteXml = "bdd-parallel.xml"
+              $execMode = "none"
+              $threads = "1"
+              $dpThreads = $env:INPUT_DP_THREAD_COUNT
+            }
+            default {
+              throw "Unsupported suite_type: $suiteType"
+            }
+          }
+
+          # Normalize optional class input (supports ClassName, package.ClassName, or src/test/java/.../ClassName.java)
+          $normalizedClass = ""
+          if (-not [string]::IsNullOrWhiteSpace($rawClass)) {
+            $normalizedClass = $rawClass -replace '\\', '/'
+            $normalizedClass = $normalizedClass -replace '^src/test/java/', ''
+            $normalizedClass = $normalizedClass -replace '\.java$', ''
+            $normalizedClass = $normalizedClass -replace '/', '.'
+          }
+
+          # Build Maven arguments dynamically
           $mvnArgs = @(
             "test",
             "-B",
-            "-Dbrowser=$env:BROWSER",
-            "-Dheadless=$env:HEADLESS",
-            "-Dincognito=$env:INCOGNITO",
-            "-DBLOCK_IMAGES=$env:BLOCK_IMAGES"
+            "-Dstyle.color=always",
+            "-P$suiteType",
+            "-Dexecution.mode=$execMode",
+            "-Dthread.count=$threads",
+            "-Ddataprovider.thread.count=$dpThreads",
+            "-DBROWSER=$browser",
+            "-DHEADLESS=$headless",
+            "-DINCOGNITO=$incognito"
           )
 
-          if (-not [string]::IsNullOrWhiteSpace($env:TEST_CLASS)) {
-            $classTarget = $env:TEST_CLASS.Trim()
-            Write-Host "Running single class independently: $classTarget"
-            $mvnArgs += "-Dtest=$classTarget"
-            $mvnArgs += "-DfailIfNoTests=false"
+          if (-not [string]::IsNullOrWhiteSpace($normalizedClass)) {
+            $mvnArgs += "-Dtest=$normalizedClass"
+            $targetDisplay = "Single Class: $normalizedClass (Flow: $suiteType)"
           } else {
-            $suiteMap = @{
-              "testng-serial"   = "testng-serial.xml"
-              "testng-parallel" = "testng-parallel.xml"
-              "bdd-serial"      = "bdd-serial.xml"
-              "bdd-parallel"    = "bdd-parallel.xml"
-            }
-
-            $suiteXml = $suiteMap[$env:SUITE]
-            Write-Host "Running suite: $suiteXml"
-            $mvnArgs += "-DsuiteXmlFile=$suiteXml"
+            $mvnArgs += "-Dsuite=$suiteXml"
+            $targetDisplay = "Suite XML: $suiteXml (Profile: $suiteType)"
           }
 
-          Write-Host "Executing: mvn $($mvnArgs -join ' ')"
-          & mvn @mvnArgs
-          exit $LASTEXITCODE
+          Write-Output "============================================================"
+          Write-Output " Execution Target : $targetDisplay"
+          Write-Output " Browser          : $browser (Headless: $headless | Incognito: $incognito)"
+          Write-Output " Threading        : mode=$execMode | threads=$threads | dataProviderThreads=$dpThreads"
+          Write-Output " Command          : mvn $($mvnArgs -join ' ')"
+          Write-Output "============================================================"
 
-      - name: Upload TestNG Reports & Evidence
+          # Write summary to GitHub Actions Job Summary
+          @(
+            "### Kill Bill Selenium CI Run ($browser)",
+            "| Parameter | Value |",
+            "| :--- | :--- |",
+            "| **Target** | ``$targetDisplay`` |",
+            "| **Browser** | ``$browser`` (Headless: ``$headless``, Incognito: ``$incognito``) |",
+            "| **Parallel Mode** | ``$execMode`` (Threads: ``$threads``, DataProvider: ``$dpThreads``) |"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+          & mvn @mvnArgs
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      # =========================================================
+      # 8. UPLOAD TESTNG ARTIFACT (ExecutionDashboard.html & Evidence)
+      # =========================================================
+      - name: Upload TestNG Dashboard & Execution Evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: testng-reports-${{ github.run_number }}
-          path: test-output/
-          if-no-files-found: ignore
+          name: testng-dashboard-${{ github.event.inputs.suite_type || 'testng-serial' }}-${{ matrix.browser }}
+          path: |
+            test-output/dashboard/ExecutionDashboard.html
+            test-output/
+          if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload BDD Cucumber Reports
+      # =========================================================
+      # 9. UPLOAD BDD ARTIFACT (cucumber.html & cucumber.json)
+      # =========================================================
+      - name: Upload Cucumber BDD Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bdd-cucumber-reports-${{ github.run_number }}
+          name: bdd-cucumber-report-${{ github.event.inputs.suite_type || 'testng-serial' }}-${{ matrix.browser }}
           path: |
             target/cucumber-reports/cucumber.html
             target/cucumber-reports/cucumber.json
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 14
+
+      # =========================================================
+      # 10. UPLOAD SUREFIRE LOGS & REPORTS
+      # =========================================================
+      - name: Upload Maven Surefire Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-logs-${{ github.event.inputs.suite_type || 'testng-serial' }}-${{ matrix.browser }}
+          path: target/surefire-reports/
+          if-no-files-found: warn
+          retention-days: 7
+
+      # =========================================================
+      # 11. CLEANUP SENSITIVE .env FILE
+      # =========================================================
+      - name: Cleanup Runtime .env
+        if: always()
+        run: |
+          if (Test-Path "src/main/java/env/.env") {
+            Remove-Item -Path "src/main/java/env/.env" -Force
+          }
