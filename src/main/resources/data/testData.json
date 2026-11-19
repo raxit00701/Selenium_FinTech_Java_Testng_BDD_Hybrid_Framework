@@ -1,0 +1,10 @@
+{
+  "iterativeData": [
+    {
+      "testCaseId": "TC_001_ValidLogin",
+      "username": "admin@killbill.com",
+      "password": "SuperSecretPassword123!",
+      "expectedMessage": "Signed in successfully."
+    }
+  ]
+}

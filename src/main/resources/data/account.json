@@ -1,0 +1,30 @@
+{
+  "iterations": [
+    {
+      "account": {
+        "payment_method_id": "",
+        "name": "QA_Tester_301",
+        "first_name_length": "10",
+        "external_key": "666666666",
+        "email": "qa.tester301@example.com",
+        "bill_cycle_day_local": "12",
+        "currency": "USD",
+        "time_zone": "America/Denver",
+        "locale": "en_US",
+        "address1": "450 Pine Street",
+        "address2": "Suite 301",
+        "postal_code": "80202",
+        "company": "NEXTGENQA",
+        "city": "Denver",
+        "state": "CO",
+        "country": "US",
+        "phone": "2025550104",
+        "notes": "Account creation iteration 1 - New QA test",
+        "is_migrated": "0",
+        "is_payment_delegated_to_parent": "",
+        "parent_account_id": ""
+      },
+      "hide": ""
+    }
+  ]
+}

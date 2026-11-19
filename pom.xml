@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ================= PROJECT ================= -->
+    <groupId>com.automation</groupId>
+    <artifactId>selenium-testng-framework</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <name>Selenium TestNG Automation Framework</name>
+
+    <!-- ================= PROPERTIES (CI/CD DYNAMIC DEFAULTS) ================= -->
+    <properties>
+        <!-- Java -->
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Selenium & Core Tools -->
+        <selenium.version>4.26.0</selenium.version>
+        <webdrivermanager.version>6.3.3</webdrivermanager.version>
+        <testng.version>7.12.0</testng.version>
+        <restassured.version>6.0.1</restassured.version>
+        
+        <!-- Utilities -->
+        <dotenv.version>5.2.2</dotenv.version>
+        <jackson.version>2.18.1</jackson.version>
+
+        <!-- Reporting & Evidence -->
+        <extent.version>5.1.2</extent.version>
+        <log4j.version>2.24.1</log4j.version>
+        <shutterbug.version>1.6</shutterbug.version>
+        <javacv.version>1.5.14</javacv.version>
+
+        <!-- Cucumber -->
+        <cucumber.version>8.0.4</cucumber.version>
+
+        <!-- CI/CD EXECUTION CONFIGURATION DEFAULTS -->
+        <!-- execution.mode: none (Serial), classes, methods, both -->
+        <execution.mode>none</execution.mode>
+        <!-- thread.count: Number of parallel threads -->
+        <thread.count>1</thread.count>
+        <!-- dataprovider.thread.count: Parallel threads for data-driven tests -->
+        <dataprovider.thread.count>3</dataprovider.thread.count>
+        
+        <!-- Default Browser & Headless Settings -->
+        <browser>chrome</browser>
+        <headless>false</headless>
+        <incognito>true</incognito>
+    </properties>
+
+    <!-- ================= DEPENDENCIES ================= -->
+    <dependencies>
+
+        <!-- SELENIUM -->
+        <dependency>
+            <groupId>org.seleniumhq.selenium</groupId>
+            <artifactId>selenium-java</artifactId>
+            <version>${selenium.version}</version>
+        </dependency>
+
+        <!-- WEBDRIVER MANAGER -->
+        <dependency>
+            <groupId>io.github.bonigarcia</groupId>
+            <artifactId>webdrivermanager</artifactId>
+            <version>${webdrivermanager.version}</version>
+        </dependency>
+
+        <!-- TESTNG -->
+        <dependency>
+            <groupId>org.testng</groupId>
+            <artifactId>testng</artifactId>
+            <version>${testng.version}</version>
+        </dependency>
+
+        <!-- MARIA DB -->
+        <dependency>
+            <groupId>org.mariadb.jdbc</groupId>
+            <artifactId>mariadb-java-client</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
+        <!-- REST ASSURED -->
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <version>${restassured.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>json-path</artifactId>
+            <version>${restassured.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>xml-path</artifactId>
+            <version>${restassured.version}</version>
+        </dependency>
+
+        <!-- JAVA DOTENV -->
+        <dependency>
+            <groupId>io.github.cdimascio</groupId>
+            <artifactId>java-dotenv</artifactId>
+            <version>${dotenv.version}</version>
+        </dependency>
+
+       <!-- JACKSON DATABIND (For JSON Data-Driven Tests) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- JACKSON JDK8 MODULE (Required by Cucumber Reports) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jdk8</artifactId>
+            <version>${jackson.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- LOGGING: SLF4J & LOG4J2 -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.17</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+
+        <!-- EXTENT REPORTS -->
+        <dependency>
+            <groupId>com.aventstack</groupId>
+            <artifactId>extentreports</artifactId>
+            <version>${extent.version}</version>
+        </dependency>
+
+        <!-- SCREENSHOT: SHUTTERBUG -->
+        
+        <dependency>
+            <groupId>com.assertthat</groupId>
+            <artifactId>selenium-shutterbug</artifactId>
+            <version>${shutterbug.version}</version>
+        </dependency>
+
+        <!-- VIDEO: JAVACV & FFMPEG -->
+        <dependency>
+            <groupId>org.bytedeco</groupId>
+            <artifactId>javacv</artifactId>
+            <version>${javacv.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bytedeco</groupId>
+            <artifactId>ffmpeg-platform</artifactId>
+            <version>8.1.2-${javacv.version}</version>
+        </dependency>
+
+        <!-- CUCUMBER BDD -->
+       
+<dependency>
+    <groupId>io.cucumber</groupId>
+    <artifactId>cucumber-java</artifactId>
+    <version>${cucumber.version}</version>
+    <scope>test</scope>
+</dependency>
+
+<dependency>
+    <groupId>io.cucumber</groupId>
+    <artifactId>cucumber-testng</artifactId>
+    <version>${cucumber.version}</version>
+    <scope>test</scope>
+</dependency>
+
+    </dependencies>
+
+    <!-- ================= BUILD ================= -->
+    <build>
+        <plugins>
+            <!-- MAVEN COMPILER -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.14.1</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                </configuration>
+            </plugin>
+
+            <!-- MAVEN SUREFIRE / TESTNG (BULLET-TRAIN SERIAL & PARALLEL ENGINE) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.3</version>
+                <configuration>
+                    <suiteXmlFiles>
+                        <suiteXmlFile>testng.xml</suiteXmlFile>
+                    </suiteXmlFiles>
+                    
+                    <!-- Dynamic execution mode: none (serial), classes, methods, both -->
+                    <parallel>${execution.mode}</parallel>
+                    <threadCount>${thread.count}</threadCount>
+
+                    <!-- Pass CI/CD parameters straight into Java System properties -->
+                    <systemPropertyVariables>
+                        <BROWSER>${browser}</BROWSER>
+                        <HEADLESS>${headless}</HEADLESS>
+                        <INCOGNITO>${incognito}</INCOGNITO>
+                    </systemPropertyVariables>
+
+                    <!-- TestNG XML & Listener configuration properties -->
+                    <properties>
+                        <property>
+                            <name>dataproviderthreadcount</name>
+                            <value>${dataprovider.thread.count}</value> 
+                        </property>
+                        
+                        <!-- Force TestNG to always inject ReportingListener -->
+                        <property>
+                            <name>listener</name>
+                            <value>utils.artifact.ReportingListener</value>
+                        </property>
+                    </properties>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

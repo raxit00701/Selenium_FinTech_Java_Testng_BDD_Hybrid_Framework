@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <!-- Console Output -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] [%-5level] %logger{36} - %msg%n"/>
+        </Console>
+        
+        <!-- Routing Appender creates a separate log file for each unique test case -->
+        <Routing name="RoutingLogger">
+            <Routes pattern="$${ctx:testName}">
+                
+                <!-- Fallback: Suite-level logs -->
+                <Route key="$${ctx:testName}">
+                    <File name="SuiteLog" fileName="test-output/logs/automation_suite.log" append="false">
+                        <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] [%-5level] %logger{36} - %msg%n"/>
+                    </File>
+                </Route>
+                
+                <!-- Dynamic: append="true" prevents mid-test overwrites during long waits -->
+                <Route>
+                    <File name="TestLog-${ctx:testName}" fileName="test-output/logs/${ctx:testName}.log" append="true">
+                        <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] [%-5level] %logger{36} - %msg%n"/>
+                    </File>
+                </Route>
+                
+            </Routes>
+        </Routing>
+    </Appenders>
+    
+    <Loggers>
+        <Root level="info">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="RoutingLogger"/>
+        </Root>
+    </Loggers>
+</Configuration>

@@ -1,0 +1,14 @@
+[
+  {
+    "testCaseId": "TC_SUB_01",
+    "bundle_id": "",
+    "account_id": "d1b18d93-13c3-4315-b5e5-2e98f59e9fbb",
+    "product_category": "BASE",
+    "bundle_external_key": "QA_Basic_Plan",
+    "external_key": "QA_Basic_Plan",
+    "plan_name": "qa-basic-monthly-101",
+    "price_override": "14",
+    "type_change": "IMM",
+    "requested_date": ""
+  }
+]

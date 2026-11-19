@@ -1,0 +1,15 @@
+[
+  {
+    "testCaseId": "TC_CAT_01",
+    "id": "1",
+    "productCategory": "BASE",
+    "productName": "QA_Basic_Plan",
+    "planId": "qa-basic-monthly-101",
+    "availableBaseProducts": "",
+    "amount": "19",
+    "currency": "USD",
+    "billingPeriod": "MONTHLY",
+    "trialLength": "14",
+    "trialTimeUnit": "UNLIMITED"
+  }
+]

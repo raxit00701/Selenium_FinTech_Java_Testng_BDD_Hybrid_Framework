@@ -1,0 +1,27 @@
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+
+<suite name="Kill Bill TestNG Parallel Suite"
+       verbose="1"
+       parallel="classes"
+       thread-count="">
+
+    <listeners>
+        <listener class-name="utils.artifact.ReportingListener"/>
+    </listeners>
+
+    <test name="TestNG Parallel Execution">
+        <classes>
+            <class name="tests.Login_validation"/>
+            <class name="tests.Login_Test"/>
+            <class name="tests.Create_Account"/>
+            <class name="tests.Create_Catalog"/>
+            <class name="tests.Create_Subs"/>
+            <class name="tests.Create_Invoice"/>
+            <class name="tests.Create_pay_method"/>
+            <class name="tests.Create_Payment"/>
+        </classes>
+    </test>
+
+</suite>

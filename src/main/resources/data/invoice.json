@@ -1,0 +1,12 @@
+[
+  {
+    "testCaseId": "TC_INV_01",
+    "account_id": "d1b18d93-13c3-4315-b5e5-2e98f59e9fbb",
+    "credit_amount": "100",
+    "credit_reason": "100 - Courtesy",
+    "credit_comment": "QA Automated Courtesy Credit",
+    "charge_amount": "200",
+    "charge_description": "QA Automated Setup Fee",
+    "charge_comment": "QA Automated Charge Comment"
+  }
+]

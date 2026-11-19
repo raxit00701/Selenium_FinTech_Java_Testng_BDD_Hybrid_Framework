@@ -1,0 +1,20 @@
+
+[
+  {
+    "testCaseId": "TC_PAY_METHOD_01",
+    "accountId": "d1b18d93-13c3-4315-b5e5-2e98f59e9fbb",
+    "externalKey": "qa-payment-method-001",
+    "cardHolderName": "QA Test User",
+    "expirationMonth": "12",
+    "expirationYear": "2030",
+    "creditCardNumber": "4111111111111111",
+    "address1": "123 Test Street",
+    "address2": "Apartment 101",
+    "city": "Bangalore",
+    "postalCode": "560102",
+    "state": "Karnataka",
+    "country": "India",
+    "pluginPropertyKey": "environment",
+    "pluginPropertyValue": "testing"
+  }
+]

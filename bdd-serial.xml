@@ -1,0 +1,19 @@
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+
+<suite name="Kill Bill BDD Serial Suite"
+       verbose="1"
+       parallel="false">
+
+    <listeners>
+        <listener class-name="utils.artifact.ReportingListener"/>
+    </listeners>
+
+    <test name="BDD Serial Execution">
+        <classes>
+            <class name="runners.TestRunner"/>
+        </classes>
+    </test>
+
+</suite>

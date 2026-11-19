@@ -1,0 +1,20 @@
+@'
+# Environment secrets
+**/.env
+**/.env.*
+
+# Build output
+target/
+
+# Test reports
+test-output/
+
+# IDE and local memory
+.vscode/
+.idea/
+.oxcode-memory/
+*.iml
+
+# Unnecessary modernization files
+.github/modernize/
+'@ | Set-Content -Path .gitignore

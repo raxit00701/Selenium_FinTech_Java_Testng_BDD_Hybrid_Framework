@@ -1,0 +1,6 @@
+{
+  "payment_method_external_key" : "YOUR_PAYMENT_METHOD_EXTERNAL_KEY",
+  "payment_reason" : "600 - Alt payment method",
+  "comment" : "QA Automated Payment Comment",
+  "invoice_id" : "b536478e-a3d3-4f62-a2a2-c6606bd947e5"
+}
