@@ -109,7 +109,7 @@ jobs:
       - name: Cache Selenium Drivers
         uses: actions/cache@v4
         with:
-          path: ~\.\cache\selenium
+          path: ~\.cache\selenium
           key: ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-${{ hashFiles('pom.xml') }}
           restore-keys: |
             ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-
@@ -201,7 +201,10 @@ jobs:
       - name: Download POM Dependencies & Compile
         run: |
           Write-Output "::group::Maven Dependency Resolution & Test Compilation"
-          mvn dependency:go-offline test-compile -B "-Dstyle.color=always"
+          mvn test-compile -B "-Dstyle.color=always"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
           Write-Output "::endgroup::"
 
       # =========================================================
@@ -216,7 +219,6 @@ jobs:
           $headless = $env:INPUT_HEADLESS.Trim().ToLower()
           $incognito = $env:INPUT_INCOGNITO.Trim().ToLower()
 
-          # Map suite_type to XML file, execution.mode, and ThreadLocal thread counts
           switch ($suiteType) {
             "testng-serial" {
               $suiteXml = "testng-serial.xml"
@@ -243,7 +245,6 @@ jobs:
             }
           }
 
-          # Normalize optional class input (supports ClassName, package.ClassName, or src/test/java/.../ClassName.java)
           $normalizedClass = ""
           if (-not [string]::IsNullOrWhiteSpace($rawClass)) {
             $normalizedClass = $rawClass -replace '\\', '/'
@@ -252,7 +253,6 @@ jobs:
             $normalizedClass = $normalizedClass -replace '/', '.'
           }
 
-          # Build Maven arguments dynamically (DataProvider thread count uses pom.xml default)
           $mvnArgs = @(
             "test",
             "-B",
@@ -280,7 +280,6 @@ jobs:
           Write-Output " Command          : mvn $($mvnArgs -join ' ')"
           Write-Output "============================================================"
 
-          # Write summary to GitHub Actions Job Summary
           @(
             "### Kill Bill Selenium CI Run ($browser)",
             "| Parameter | Value |",
