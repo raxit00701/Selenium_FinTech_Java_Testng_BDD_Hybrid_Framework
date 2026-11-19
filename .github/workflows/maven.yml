@@ -33,7 +33,7 @@ on:
           - firefox
           - all
       headless:
-        description: 'Headless Mode (true = CI Headless, false = Headed UI)'
+        description: 'Headless Mode (true = CI Headless, false = Virtual Display Xvfb)'
         required: true
         type: choice
         default: 'true'
@@ -54,14 +54,10 @@ on:
         type: string
         default: '4'
 
-defaults:
-  run:
-    shell: pwsh
-
 jobs:
   selenium-ci-execution:
     name: ${{ github.event.inputs.suite_type || 'testng-serial' }} | ${{ matrix.browser }}
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
@@ -69,16 +65,14 @@ jobs:
         browser: ${{ fromJSON(github.event.inputs.browser == 'all' && '["chrome", "edge", "firefox"]' || format('["{0}"]', github.event.inputs.browser || 'chrome')) }}
 
     env:
-      # Existing CI Secrets / Variables
-      BASE_URL: ${{ secrets.BASE_URL || vars.BASE_URL }}
-      API_BASE_URL: ${{ secrets.API_BASE_URL || vars.API_BASE_URL }}
-      LOGIN_USERNAME: ${{ secrets.LOGIN_USERNAME || vars.LOGIN_USERNAME }}
-      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD || vars.LOGIN_PASSWORD }}
-      DB_URL: ${{ secrets.DB_URL || vars.DB_URL }}
-      DB_USERNAME: ${{ secrets.DB_USERNAME || vars.DB_USERNAME }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD || vars.DB_PASSWORD }}
+      BASE_URL: ${{ secrets.BASE_URL || vars.BASE_URL || 'http://localhost:9090' }}
+      API_BASE_URL: ${{ secrets.API_BASE_URL || vars.API_BASE_URL || 'http://localhost:8080' }}
+      LOGIN_USERNAME: ${{ secrets.LOGIN_USERNAME || vars.LOGIN_USERNAME || 'admin' }}
+      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD || vars.LOGIN_PASSWORD || 'password' }}
+      DB_URL: ${{ secrets.DB_URL || vars.DB_URL || 'jdbc:mariadb://localhost:3307/killbill' }}
+      DB_USERNAME: ${{ secrets.DB_USERNAME || vars.DB_USERNAME || 'root' }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD || vars.DB_PASSWORD || 'killbill' }}
 
-      # Dynamic Execution Inputs
       INPUT_SUITE_TYPE: ${{ github.event.inputs.suite_type || 'testng-serial' }}
       INPUT_TEST_CLASS: ${{ github.event.inputs.test_class || '' }}
       INPUT_BROWSER: ${{ matrix.browser }}
@@ -109,213 +103,214 @@ jobs:
       - name: Cache Selenium Drivers
         uses: actions/cache@v4
         with:
-          path: ${{ env.USERPROFILE }}\.cache\selenium
+          path: ~/.cache/selenium
           key: ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-${{ hashFiles('pom.xml') }}
           restore-keys: |
             ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-
             ${{ runner.os }}-selenium-drivers-
 
       # =========================================================
-      # 4. VERIFY / INSTALL BROWSERS ON WINDOWS RUNNER
+      # 4. VERIFY BROWSERS ON UBUNTU RUNNER
       # =========================================================
       - name: Setup & Verify Browser (${{ matrix.browser }})
         run: |
-          Write-Output "::group::Browser Verification & Setup ($env:INPUT_BROWSER)"
-          switch ($env:INPUT_BROWSER.ToLower()) {
-            "chrome" {
-              $chromePaths = @(
-                "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-                "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
-              )
-              $chromeExe = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-              if (-not $chromeExe) {
-                Write-Output "Installing Google Chrome via Chocolatey..."
-                choco install googlechrome -y --no-progress
-                $chromeExe = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-              }
-              $version = (Get-Item $chromeExe).VersionInfo.ProductVersion
-              Write-Output "Google Chrome ready: $version ($chromeExe)"
-            }
-            "edge" {
-              $edgePaths = @(
-                "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
-                "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
-              )
-              $edgeExe = $edgePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-              if (-not $edgeExe) {
-                Write-Output "Installing Microsoft Edge via Chocolatey..."
-                choco install microsoft-edge -y --no-progress
-                $edgeExe = $edgePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-              }
-              $version = (Get-Item $edgeExe).VersionInfo.ProductVersion
-              Write-Output "Microsoft Edge ready: $version ($edgeExe)"
-            }
-            "firefox" {
-              $ffPaths = @(
-                "$env:ProgramFiles\Mozilla Firefox\firefox.exe",
-                "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe"
-              )
-              $ffExe = $ffPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-              if (-not $ffExe) {
-                Write-Output "Installing Mozilla Firefox via Chocolatey..."
-                choco install firefox -y --no-progress
-                $ffExe = $ffPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-              }
-              $version = (Get-Item $ffExe).VersionInfo.ProductVersion
-              Write-Output "Mozilla Firefox ready: $version ($ffExe)"
-            }
-          }
-          Write-Output "::endgroup::"
+          echo "::group::Browser Verification ($INPUT_BROWSER)"
+          case "${INPUT_BROWSER,,}" in
+            chrome)
+              google-chrome --version
+              ;;
+            edge)
+              microsoft-edge --version
+              ;;
+            firefox)
+              if ! command -v firefox &> /dev/null; then
+                sudo apt-get update && sudo apt-get install -y firefox
+              fi
+              firefox --version
+              ;;
+          esac
+          echo "::endgroup::"
 
       # =========================================================
-      # 5. CONFIGURE RUNTIME .env FROM CI SECRETS / VARIABLES
+      # 5. CONFIGURE RUNTIME .env FROM CI VARIABLES / SECRETS
       # =========================================================
       - name: Configure Runtime Environment (.env)
         run: |
-          Write-Output "::group::Generating src/main/java/env/.env from CI Variables"
-          $baseUrl = "$env:BASE_URL".Trim().TrimEnd('/')
-          $apiBaseUrl = "$env:API_BASE_URL".Trim().TrimEnd('/')
-          $loginUser = "$env:LOGIN_USERNAME".Trim()
-          $loginPass = "$env:LOGIN_PASSWORD".Trim()
-          $dbUrl = "$env:DB_URL".Trim()
-          $dbUser = "$env:DB_USERNAME".Trim()
-          $dbPass = "$env:DB_PASSWORD".Trim()
-
-          if ($dbPass) { Write-Output "::add-mask::$dbPass" }
-          if ($loginPass) { Write-Output "::add-mask::$loginPass" }
-
-          if ([string]::IsNullOrWhiteSpace($baseUrl) -or $baseUrl -match 'localhost|127\.0\.0\.1') {
-            Write-Error "BASE_URL is '$baseUrl'. A Windows cloud runner cannot reach localhost on your local PC. Update BASE_URL, API_BASE_URL, and DB_URL in GitHub Variables to reachable tunnel/cloud endpoints."
-            exit 1
-          }
-
-          $envDir = "src/main/java/env"
-          if (-not (Test-Path $envDir)) {
-            New-Item -ItemType Directory -Path $envDir -Force | Out-Null
-          }
-
-          $envContent = @(
-            "BASE_URL=$baseUrl",
-            "API_BASE_URL=$apiBaseUrl",
-            "LOGIN_USERNAME=$loginUser",
-            "LOGIN_PASSWORD=$loginPass",
-            "DB_URL=$dbUrl",
-            "DB_USERNAME=$dbUser",
-            "DB_PASSWORD=$dbPass"
-          )
-
-          Set-Content -Path "$envDir/.env" -Value $envContent -Encoding UTF8
-          Write-Output "Runtime .env created successfully (BASE_URL: $baseUrl | API_BASE_URL: $apiBaseUrl | DB_URL: $dbUrl)"
-          Write-Output "::endgroup::"
+          echo "::group::Generating src/main/java/env/.env"
+          mkdir -p src/main/java/env
+          cat <<EOF > src/main/java/env/.env
+          BASE_URL=${BASE_URL%/}
+          API_BASE_URL=${API_BASE_URL%/}
+          LOGIN_USERNAME=${LOGIN_USERNAME}
+          LOGIN_PASSWORD=${LOGIN_PASSWORD}
+          DB_URL=${DB_URL}
+          DB_USERNAME=${DB_USERNAME}
+          DB_PASSWORD=${DB_PASSWORD}
+          EOF
+          echo "Runtime .env created (BASE_URL: ${BASE_URL%/} | API_BASE_URL: ${API_BASE_URL%/} | DB_URL: ${DB_URL})"
+          echo "::endgroup::"
 
       # =========================================================
-      # 6. INSTALL POM DEPENDENCIES & COMPILE TESTS
+      # 6. START MARIADB, SEED BASELINE DATA, AND BOOT KILL BILL + KAUI
       # =========================================================
-      - name: Download POM Dependencies & Compile
+      - name: Start Kill Bill, Kaui & MariaDB Services
         run: |
-          Write-Output "::group::Maven Dependency Resolution & Test Compilation"
-          mvn test-compile -B "-Dstyle.color=always"
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-          Write-Output "::endgroup::"
+          echo "::group::Starting MariaDB Container"
+          docker compose -f docker-compose.yml up -d db
+          for i in $(seq 1 30); do
+            if docker compose -f docker-compose.yml exec -T db mysqladmin ping -h localhost -u"${DB_USERNAME}" -p"${DB_PASSWORD}" --silent; then
+              echo "MariaDB is ready on localhost:3307!"
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -f "ci-seed.sql" ]; then
+            echo "Importing baseline tenant & account data from ci-seed.sql..."
+            docker compose -f docker-compose.yml exec -T db mysql -u"${DB_USERNAME}" -p"${DB_PASSWORD}" < ci-seed.sql
+            echo "Baseline database seeded successfully."
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Starting Kill Bill (8080) & Kaui (9090)"
+          docker compose -f docker-compose.yml up -d killbill kaui
+          for i in $(seq 1 60); do
+            kb_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/1.0/healthcheck || echo "000")
+            kaui_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9090 || echo "000")
+            echo "Attempt $i/60 -> Kill Bill HTTP: $kb_status | Kaui HTTP: $kaui_status"
+            if [[ "$kb_status" == "200" && ("$kaui_status" == "200" || "$kaui_status" == "302") ]]; then
+              echo "Kill Bill and Kaui are ready!"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "Timed out waiting for Kill Bill / Kaui containers."
+              docker compose -f docker-compose.yml logs --tail=100
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "::endgroup::"
 
       # =========================================================
-      # 7. EXECUTE SELENIUM SUITE (TESTNG OR BDD / SERIAL OR PARALLEL)
+      # 7. COMPILE TEST CLASSES
+      # =========================================================
+      - name: Compile Project & Tests
+        run: |
+          echo "::group::Maven Test Compilation"
+          mvn test-compile -B -Dstyle.color=always
+          echo "::endgroup::"
+
+      # =========================================================
+      # 8. EXECUTE SELENIUM SUITE (TESTNG OR BDD / SERIAL OR PARALLEL)
       # =========================================================
       - name: Run Selenium Automation Suite
         id: run_tests
         run: |
-          $suiteType = $env:INPUT_SUITE_TYPE.Trim().ToLower()
-          $rawClass = $env:INPUT_TEST_CLASS.Trim()
-          $browser = $env:INPUT_BROWSER.Trim().ToLower()
-          $headless = $env:INPUT_HEADLESS.Trim().ToLower()
-          $incognito = $env:INPUT_INCOGNITO.Trim().ToLower()
+          suite_type="${INPUT_SUITE_TYPE,,}"
+          raw_class="$(echo "$INPUT_TEST_CLASS" | xargs)"
+          browser="${INPUT_BROWSER,,}"
+          headless="${INPUT_HEADLESS,,}"
+          incognito="${INPUT_INCOGNITO,,}"
 
-          switch ($suiteType) {
-            "testng-serial" {
-              $suiteXml = "testng-serial.xml"
-              $execMode = "none"
-              $threads = "1"
-            }
-            "testng-parallel" {
-              $suiteXml = "testng-parallel.xml"
-              $execMode = "classes"
-              $threads = $env:INPUT_THREAD_COUNT
-            }
-            "bdd-serial" {
-              $suiteXml = "bdd-serial.xml"
-              $execMode = "none"
-              $threads = "1"
-            }
-            "bdd-parallel" {
-              $suiteXml = "bdd-parallel.xml"
-              $execMode = "none"
-              $threads = "1"
-            }
-            default {
-              throw "Unsupported suite_type: $suiteType"
-            }
-          }
+          case "$suite_type" in
+            testng-serial)
+              suite_xml="testng-serial.xml"
+              exec_mode="none"
+              threads="1"
+              ;;
+            testng-parallel)
+              suite_xml="testng-parallel.xml"
+              exec_mode="classes"
+              threads="$INPUT_THREAD_COUNT"
+              ;;
+            bdd-serial)
+              suite_xml="bdd-serial.xml"
+              exec_mode="none"
+              threads="1"
+              ;;
+            bdd-parallel)
+              suite_xml="bdd-parallel.xml"
+              exec_mode="none"
+              threads="1"
+              ;;
+            *)
+              echo "Unsupported suite_type: $suite_type"
+              exit 1
+              ;;
+          esac
 
-          $normalizedClass = ""
-          if (-not [string]::IsNullOrWhiteSpace($rawClass)) {
-            $normalizedClass = $rawClass -replace '\\', '/'
-            $normalizedClass = $normalizedClass -replace '^src/test/java/', ''
-            $normalizedClass = $normalizedClass -replace '\.java$', ''
-            $normalizedClass = $normalizedClass -replace '/', '.'
-          }
-
-          $mvnArgs = @(
-            "test",
-            "-B",
-            "-e",
-            "-Dstyle.color=always",
-            "-P$suiteType",
-            "-Dexecution.mode=$execMode",
-            "-Dthread.count=$threads",
-            "-DBROWSER=$browser",
-            "-DHEADLESS=$headless",
-            "-DINCOGNITO=$incognito"
+          mvn_args=(
+            "test"
+            "-B"
+            "-e"
+            "-Dstyle.color=always"
+            "-P${suite_type}"
+            "-Dexecution.mode=${exec_mode}"
+            "-Dthread.count=${threads}"
+            "-DBROWSER=${browser}"
+            "-DHEADLESS=${headless}"
+            "-DINCOGNITO=${incognito}"
           )
 
-          if (-not [string]::IsNullOrWhiteSpace($normalizedClass)) {
-            $mvnArgs += "-Dtest=$normalizedClass"
-            $targetDisplay = "Single Class: $normalizedClass (Flow: $suiteType)"
-          } else {
-            $mvnArgs += "-Dsuite=$suiteXml"
-            $targetDisplay = "Suite XML: $suiteXml (Profile: $suiteType)"
-          }
+          if [ -n "$raw_class" ]; then
+            normalized_class="${raw_class//\\//}"
+            normalized_class="${normalized_class#src/test/java/}"
+            normalized_class="${normalized_class%.java}"
+            normalized_class="${normalized_class//\//.}"
+            mvn_args+=("-Dtest=${normalized_class}")
+            target_display="Single Class: ${normalized_class} (Flow: ${suite_type})"
+          else
+            mvn_args+=("-Dsuite=${suite_xml}")
+            target_display="Suite XML: ${suite_xml} (Profile: ${suite_type})"
+          fi
 
-          Write-Output "============================================================"
-          Write-Output " Execution Target : $targetDisplay"
-          Write-Output " Browser          : $browser (Headless: $headless | Incognito: $incognito)"
-          Write-Output " Threading        : mode=$execMode | threads=$threads (DataProvider: pom.xml default)"
-          Write-Output " Command          : mvn $($mvnArgs -join ' ')"
-          Write-Output "============================================================"
+          echo "============================================================"
+          echo " Execution Target : $target_display"
+          echo " Browser          : $browser (Headless: $headless | Incognito: $incognito)"
+          echo " Threading        : mode=$exec_mode | threads=$threads (DataProvider: pom.xml default)"
+          echo " Command          : mvn ${mvn_args[*]}"
+          echo "============================================================"
 
-          @(
-            "### Kill Bill Selenium CI Run ($browser)",
-            "| Parameter | Value |",
-            "| :--- | :--- |",
-            "| **Target** | ``$targetDisplay`` |",
-            "| **Browser** | ``$browser`` (Headless: ``$headless``, Incognito: ``$incognito``) |",
-            "| **Parallel Mode** | ``$execMode`` (Threads: ``$threads``, DataProvider: ``pom.xml default``) |"
-          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          {
+            echo "### Kill Bill Selenium CI Run ($browser)"
+            echo "| Parameter | Value |"
+            echo "| :--- | :--- |"
+            echo "| **Target** | \`$target_display\` |"
+            echo "| **Browser** | \`$browser\` (Headless: \`$headless\`, Incognito: \`$incognito\`) |"
+            echo "| **Parallel Mode** | \`$exec_mode\` (Threads: \`$threads\`, DataProvider: \`pom.xml default\`) |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          & mvn @mvnArgs
-          $exitCode = $LASTEXITCODE
-          if ($exitCode -ne 0) {
-            Get-ChildItem -Path "target/surefire-reports/*.dumpstream" -ErrorAction SilentlyContinue | ForEach-Object {
-              Write-Output "::group::Surefire Dump ($($_.Name))"
-              Get-Content -Path $_.FullName
-              Write-Output "::endgroup::"
-            }
-            exit $exitCode
-          }
+          set +e
+          if [ "$headless" = "false" ]; then
+            xvfb-run -a mvn "${mvn_args[@]}"
+          else
+            mvn "${mvn_args[@]}"
+          fi
+          exit_code=$?
+          set -e
+
+          if [ $exit_code -ne 0 ]; then
+            for dump in target/surefire-reports/*.dumpstream; do
+              [ -f "$dump" ] || continue
+              echo "::group::Surefire Dump ($dump)"
+              cat "$dump"
+              echo "::endgroup::"
+            done
+            exit $exit_code
+          fi
 
       # =========================================================
-      # 8. UPLOAD TESTNG ARTIFACT (ExecutionDashboard.html & Evidence)
+      # 9. DUMP DOCKER LOGS ON FAILURE
+      # =========================================================
+      - name: Print Container Logs on Failure
+        if: failure()
+        run: |
+          echo "::group::Docker Compose Container Logs"
+          docker compose -f docker-compose.yml logs --tail=150
+          echo "::endgroup::"
+
+      # =========================================================
+      # 10. UPLOAD TESTNG ARTIFACT (ExecutionDashboard.html & Evidence)
       # =========================================================
       - name: Upload TestNG Dashboard & Execution Evidence
         if: always()
@@ -329,7 +324,7 @@ jobs:
           retention-days: 14
 
       # =========================================================
-      # 9. UPLOAD BDD ARTIFACT (cucumber.html & cucumber.json)
+      # 11. UPLOAD BDD ARTIFACT (cucumber.html & cucumber.json)
       # =========================================================
       - name: Upload Cucumber BDD Report
         if: always()
@@ -343,7 +338,7 @@ jobs:
           retention-days: 14
 
       # =========================================================
-      # 10. UPLOAD SUREFIRE LOGS & REPORTS
+      # 12. UPLOAD SUREFIRE LOGS & REPORTS
       # =========================================================
       - name: Upload Maven Surefire Logs
         if: always()
@@ -355,11 +350,10 @@ jobs:
           retention-days: 7
 
       # =========================================================
-      # 11. CLEANUP SENSITIVE .env FILE
+      # 13. TEARDOWN DOCKER & CLEANUP SENSITIVE .env FILE
       # =========================================================
-      - name: Cleanup Runtime .env
+      - name: Cleanup Docker & Runtime .env
         if: always()
         run: |
-          if (Test-Path "src/main/java/env/.env") {
-            Remove-Item -Path "src/main/java/env/.env" -Force
-          }
+          docker compose -f docker-compose.yml down -v || true
+          rm -f src/main/java/env/.env
