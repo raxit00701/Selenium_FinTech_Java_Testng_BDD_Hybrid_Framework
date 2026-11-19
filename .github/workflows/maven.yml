@@ -153,23 +153,34 @@ jobs:
       # =========================================================
       # 6. START MARIADB, SEED BASELINE DATA, AND BOOT KILL BILL + KAUI
       # =========================================================
+      # =========================================================
+      # 6. START MARIADB, SEED BASELINE DATA, AND BOOT KILL BILL + KAUI
+      # =========================================================
       - name: Start Kill Bill, Kaui & MariaDB Services
         run: |
           echo "::group::Starting MariaDB Container"
+          if [ ! -f "ci-seed.sql" ]; then
+            echo "ERROR: ci-seed.sql is missing from repository root. Export and commit ci-seed.sql first."
+            exit 1
+          fi
+
           docker compose -f docker-compose.yml up -d db
           for i in $(seq 1 30); do
             if docker compose -f docker-compose.yml exec -T db mysqladmin ping -h localhost -u"${DB_USERNAME}" -p"${DB_PASSWORD}" --silent; then
               echo "MariaDB is ready on localhost:3307!"
               break
             fi
+            if [ "$i" -eq 30 ]; then
+              echo "Timed out waiting for MariaDB."
+              exit 1
+            fi
             sleep 2
           done
 
-          if [ -f "ci-seed.sql" ]; then
-            echo "Importing baseline tenant & account data from ci-seed.sql..."
-            docker compose -f docker-compose.yml exec -T db mysql -u"${DB_USERNAME}" -p"${DB_PASSWORD}" < ci-seed.sql
-            echo "Baseline database seeded successfully."
-          fi
+          echo "Importing baseline tenant & account data from ci-seed.sql..."
+          sed -i '1s/^\xEF\xBB\xBF//' ci-seed.sql
+          docker compose -f docker-compose.yml exec -T db mysql -u"${DB_USERNAME}" -p"${DB_PASSWORD}" < ci-seed.sql
+          docker compose -f docker-compose.yml exec -T db mysql -u"${DB_USERNAME}" -p"${DB_PASSWORD}" -e "SELECT id, name FROM kaui.kaui_tenants; SELECT id, external_key FROM killbill.accounts WHERE id='d1b18d93-13c3-4315-b5e5-2e98f59e9fbb';"
           echo "::endgroup::"
 
           echo "::group::Starting Kill Bill (8080) & Kaui (9090)"
