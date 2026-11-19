@@ -22,7 +22,7 @@
         <webdrivermanager.version>6.3.3</webdrivermanager.version>
         <testng.version>7.12.0</testng.version>
         <restassured.version>6.0.1</restassured.version>
-        
+
         <!-- Utilities -->
         <dotenv.version>5.2.2</dotenv.version>
         <jackson.version>2.18.1</jackson.version>
@@ -37,17 +37,16 @@
         <cucumber.version>8.0.4</cucumber.version>
 
         <!-- CI/CD EXECUTION CONFIGURATION DEFAULTS -->
-        <!-- execution.mode: none (Serial), classes, methods, both -->
-        <execution.mode>none</execution.mode>
-        <!-- thread.count: Number of parallel threads -->
-        <thread.count>1</thread.count>
-        <!-- dataprovider.thread.count: Parallel threads for data-driven tests -->
+        <!-- Default suite when neither -DsuiteXmlFile nor -Dtest is passed -->
+        <suiteXmlFile>testng-serial.xml</suiteXmlFile>
+        <!-- Parallel threads for data-driven tests -->
         <dataprovider.thread.count>3</dataprovider.thread.count>
-        
-        <!-- Default Browser & Headless Settings -->
+
+        <!-- Default Browser & DriverFactory Settings -->
         <browser>chrome</browser>
         <headless>false</headless>
         <incognito>true</incognito>
+        <BLOCK_IMAGES>false</BLOCK_IMAGES>
     </properties>
 
     <!-- ================= DEPENDENCIES ================= -->
@@ -105,7 +104,7 @@
             <version>${dotenv.version}</version>
         </dependency>
 
-       <!-- JACKSON DATABIND (For JSON Data-Driven Tests) -->
+        <!-- JACKSON DATABIND (For JSON Data-Driven Tests) -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -150,7 +149,6 @@
         </dependency>
 
         <!-- SCREENSHOT: SHUTTERBUG -->
-        
         <dependency>
             <groupId>com.assertthat</groupId>
             <artifactId>selenium-shutterbug</artifactId>
@@ -170,20 +168,18 @@
         </dependency>
 
         <!-- CUCUMBER BDD -->
-       
-<dependency>
-    <groupId>io.cucumber</groupId>
-    <artifactId>cucumber-java</artifactId>
-    <version>${cucumber.version}</version>
-    <scope>test</scope>
-</dependency>
-
-<dependency>
-    <groupId>io.cucumber</groupId>
-    <artifactId>cucumber-testng</artifactId>
-    <version>${cucumber.version}</version>
-    <scope>test</scope>
-</dependency>
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-java</artifactId>
+            <version>${cucumber.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-testng</artifactId>
+            <version>${cucumber.version}</version>
+            <scope>test</scope>
+        </dependency>
 
     </dependencies>
 
@@ -200,34 +196,27 @@
                 </configuration>
             </plugin>
 
-            <!-- MAVEN SUREFIRE / TESTNG (BULLET-TRAIN SERIAL & PARALLEL ENGINE) -->
+            <!-- MAVEN SUREFIRE / TESTNG -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.3</version>
                 <configuration>
-                    <suiteXmlFiles>
-                        <suiteXmlFile>testng.xml</suiteXmlFile>
-                    </suiteXmlFiles>
-                    
-                    <!-- Dynamic execution mode: none (serial), classes, methods, both -->
-                    <parallel>${execution.mode}</parallel>
-                    <threadCount>${thread.count}</threadCount>
-
                     <!-- Pass CI/CD parameters straight into Java System properties -->
                     <systemPropertyVariables>
                         <BROWSER>${browser}</BROWSER>
                         <HEADLESS>${headless}</HEADLESS>
                         <INCOGNITO>${incognito}</INCOGNITO>
+                        <BLOCK_IMAGES>${BLOCK_IMAGES}</BLOCK_IMAGES>
                     </systemPropertyVariables>
 
                     <!-- TestNG XML & Listener configuration properties -->
                     <properties>
                         <property>
                             <name>dataproviderthreadcount</name>
-                            <value>${dataprovider.thread.count}</value> 
+                            <value>${dataprovider.thread.count}</value>
                         </property>
-                        
+
                         <!-- Force TestNG to always inject ReportingListener -->
                         <property>
                             <name>listener</name>
@@ -238,4 +227,30 @@
             </plugin>
         </plugins>
     </build>
+
+    <!-- ================= PROFILES ================= -->
+    <profiles>
+        <!-- Runs the selected XML suite unless -Dtest=... is passed for a single-class run -->
+        <profile>
+            <id>suite-run</id>
+            <activation>
+                <property>
+                    <name>!test</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <suiteXmlFiles>
+                                <suiteXmlFile>${suiteXmlFile}</suiteXmlFile>
+                            </suiteXmlFiles>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
