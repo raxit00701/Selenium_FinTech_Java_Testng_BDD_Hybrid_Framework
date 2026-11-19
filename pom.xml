@@ -1,137 +1,309 @@
-name: Selenium TestNG & BDD CI
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
-    inputs:
-      suite:
-        description: 'Suite to run (ignored if Single Test Class is provided)'
-        type: choice
-        default: 'testng-serial'
-        options:
-          - testng-serial
-          - testng-parallel
-          - bdd-serial
-          - bdd-parallel
-      test_class:
-        description: 'Optional: Run any single class independently (e.g., tests.Create_Catalog or runners.TestRunner)'
-        type: string
-        required: false
-        default: ''
-      browser:
-        description: 'Browser (matches DriverFactory)'
-        type: choice
-        default: 'chrome'
-        options:
-          - chrome
-          - edge
-          - firefox
-      headless:
-        description: 'Run in headless mode'
-        type: boolean
-        default: true
-      incognito:
-        description: 'Run in incognito/private mode'
-        type: boolean
-        default: true
-      block_images:
-        description: 'Block images for faster loads (-DBLOCK_IMAGES)'
-        type: boolean
-        default: false
+    <modelVersion>4.0.0</modelVersion>
 
-jobs:
-  run-tests:
-    runs-on: windows-latest
+    <!-- ================= PROJECT ================= -->
+    <groupId>com.automation</groupId>
+    <artifactId>selenium-testng-framework</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <name>Selenium TestNG Automation Framework</name>
 
-    defaults:
-      run:
-        shell: powershell
+    <!-- ================= PROPERTIES (DYNAMIC DEFAULTS) ================= -->
+    <properties>
+        <!-- Java -->
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-    env:
-      API_BASE_URL: ${{ vars.API_BASE_URL }}
-      BASE_URL: ${{ vars.BASE_URL }}
-      DB_URL: ${{ vars.DB_URL }}
-      DB_USERNAME: ${{ vars.DB_USERNAME }}
-      DB_PASSWORD: ${{ vars.DB_PASSWORD }}
-      LOGIN_USERNAME: ${{ vars.LOGIN_USERNAME }}
-      LOGIN_PASSWORD: ${{ vars.LOGIN_PASSWORD }}
+        <!-- Selenium & Core Tools -->
+        <selenium.version>4.26.0</selenium.version>
+        <webdrivermanager.version>6.3.3</webdrivermanager.version>
+        <testng.version>7.12.0</testng.version>
+        <restassured.version>6.0.1</restassured.version>
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+        <!-- Utilities -->
+        <dotenv.version>5.2.2</dotenv.version>
+        <jackson.version>2.18.1</jackson.version>
 
-      - name: Set up Java 17 & cache Maven dependencies
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-          cache: 'maven'
+        <!-- Reporting & Evidence -->
+        <extent.version>5.1.2</extent.version>
+        <log4j.version>2.24.1</log4j.version>
+        <shutterbug.version>1.6</shutterbug.version>
+        <javacv.version>1.5.14</javacv.version>
 
-      - name: Run Maven Tests
-        env:
-          SUITE: ${{ inputs.suite }}
-          TEST_CLASS: ${{ inputs.test_class }}
-          BROWSER: ${{ inputs.browser }}
-          HEADLESS: ${{ inputs.headless }}
-          INCOGNITO: ${{ inputs.incognito }}
-          BLOCK_IMAGES: ${{ inputs.block_images }}
-        run: |
-          $suite       = if ([string]::IsNullOrWhiteSpace($env:SUITE))        { "testng-serial" } else { $env:SUITE.Trim() }
-          $browser     = if ([string]::IsNullOrWhiteSpace($env:BROWSER))      { "chrome" }        else { $env:BROWSER.Trim() }
-          $headless    = if ([string]::IsNullOrWhiteSpace($env:HEADLESS))     { "true" }          else { $env:HEADLESS.Trim().ToLower() }
-          $incognito   = if ([string]::IsNullOrWhiteSpace($env:INCOGNITO))    { "true" }          else { $env:INCOGNITO.Trim().ToLower() }
-          $blockImages = if ([string]::IsNullOrWhiteSpace($env:BLOCK_IMAGES)) { "false" }         else { $env:BLOCK_IMAGES.Trim().ToLower() }
+        <!-- Cucumber -->
+        <cucumber.version>8.0.4</cucumber.version>
 
-          $mvnArgs = @(
-            "test",
-            "-B",
-            "-Dbrowser=$browser",
-            "-Dheadless=$headless",
-            "-Dincognito=$incognito",
-            "-DBLOCK_IMAGES=$blockImages"
-          )
+        <!-- Dynamic Suite & Thread Configuration (Overridable via -D or -P) -->
+        <suite>testng-serial.xml</suite>
+        <execution.mode>none</execution.mode>
+        <thread.count>1</thread.count>
+        <dataprovider.thread.count>1</dataprovider.thread.count>
 
-          if (-not [string]::IsNullOrWhiteSpace($env:TEST_CLASS)) {
-            $classTarget = $env:TEST_CLASS.Trim()
-            Write-Host "Running single class independently: $classTarget"
-            $mvnArgs += "-Dtest=$classTarget"
-            $mvnArgs += "-DfailIfNoTests=false"
-          } else {
-            $suiteMap = @{
-              "testng-serial"   = "testng-serial.xml"
-              "testng-parallel" = "testng-parallel.xml"
-              "bdd-serial"      = "bdd-serial.xml"
-              "bdd-parallel"    = "bdd-parallel.xml"
-            }
+        <!-- Browser & Session Defaults (Matches -DBROWSER, -DHEADLESS, -DINCOGNITO CLI flags) -->
+        <BROWSER>chrome</BROWSER>
+        <HEADLESS>false</HEADLESS>
+        <INCOGNITO>false</INCOGNITO>
+        <REUSE_BROWSER>true</REUSE_BROWSER>
+    </properties>
 
-            $suiteXml = $suiteMap[$suite]
-            Write-Host "Running suite: $suiteXml"
-            $mvnArgs += "-DsuiteXmlFile=$suiteXml"
-          }
+    <!-- ================= DEPENDENCIES ================= -->
+    <dependencies>
 
-          Write-Host "Executing: mvn $($mvnArgs -join ' ')"
-          & mvn @mvnArgs
-          exit $LASTEXITCODE
+        <!-- SELENIUM -->
+        <dependency>
+            <groupId>org.seleniumhq.selenium</groupId>
+            <artifactId>selenium-java</artifactId>
+            <version>${selenium.version}</version>
+        </dependency>
 
-      - name: Upload TestNG Reports & Evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: testng-reports-${{ github.run_number }}
-          path: test-output/
-          if-no-files-found: ignore
-          retention-days: 14
+        <!-- WEBDRIVER MANAGER -->
+        <dependency>
+            <groupId>io.github.bonigarcia</groupId>
+            <artifactId>webdrivermanager</artifactId>
+            <version>${webdrivermanager.version}</version>
+        </dependency>
 
-      - name: Upload BDD Cucumber Reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bdd-cucumber-reports-${{ github.run_number }}
-          path: |
-            target/cucumber-reports/cucumber.html
-            target/cucumber-reports/cucumber.json
-          if-no-files-found: ignore
-          retention-days: 14
+        <!-- TESTNG -->
+        <dependency>
+            <groupId>org.testng</groupId>
+            <artifactId>testng</artifactId>
+            <version>${testng.version}</version>
+        </dependency>
+
+        <!-- MARIA DB -->
+        <dependency>
+            <groupId>org.mariadb.jdbc</groupId>
+            <artifactId>mariadb-java-client</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
+        <!-- REST ASSURED -->
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <version>${restassured.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>json-path</artifactId>
+            <version>${restassured.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>xml-path</artifactId>
+            <version>${restassured.version}</version>
+        </dependency>
+
+        <!-- JAVA DOTENV -->
+        <dependency>
+            <groupId>io.github.cdimascio</groupId>
+            <artifactId>java-dotenv</artifactId>
+            <version>${dotenv.version}</version>
+        </dependency>
+
+        <!-- JACKSON DATABIND (For JSON Data-Driven Tests) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- JACKSON JDK8 MODULE (Required by Cucumber Reports) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jdk8</artifactId>
+            <version>${jackson.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- LOGGING: SLF4J & LOG4J2 -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.17</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+
+        <!-- EXTENT REPORTS -->
+        <dependency>
+            <groupId>com.aventstack</groupId>
+            <artifactId>extentreports</artifactId>
+            <version>${extent.version}</version>
+        </dependency>
+
+        <!-- SCREENSHOT: SHUTTERBUG -->
+        <dependency>
+            <groupId>com.assertthat</groupId>
+            <artifactId>selenium-shutterbug</artifactId>
+            <version>${shutterbug.version}</version>
+        </dependency>
+
+        <!-- VIDEO: JAVACV & FFMPEG -->
+        <dependency>
+            <groupId>org.bytedeco</groupId>
+            <artifactId>javacv</artifactId>
+            <version>${javacv.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bytedeco</groupId>
+            <artifactId>ffmpeg-platform</artifactId>
+            <version>8.1.2-${javacv.version}</version>
+        </dependency>
+
+        <!-- CUCUMBER BDD -->
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-java</artifactId>
+            <version>${cucumber.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-testng</artifactId>
+            <version>${cucumber.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <!-- ================= BUILD ================= -->
+    <build>
+        <plugins>
+            <!-- MAVEN COMPILER -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.14.1</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                </configuration>
+            </plugin>
+
+            <!-- MAVEN SUREFIRE / TESTNG (SERIAL & PARALLEL DYNAMIC ENGINE) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.3</version>
+                <configuration>
+                    <suiteXmlFiles>
+                        <suiteXmlFile>${suite}</suiteXmlFile>
+                    </suiteXmlFiles>
+
+                    <!-- Dynamic execution mode: none (serial), classes, methods, both -->
+                    <parallel>${execution.mode}</parallel>
+                    <threadCount>${thread.count}</threadCount>
+
+                    <!-- Forward CLI / Profile properties directly to forked JVM -->
+                    <systemPropertyVariables>
+                        <BROWSER>${BROWSER}</BROWSER>
+                        <HEADLESS>${HEADLESS}</HEADLESS>
+                        <INCOGNITO>${INCOGNITO}</INCOGNITO>
+                        <REUSE_BROWSER>${REUSE_BROWSER}</REUSE_BROWSER>
+                        <thread.count>${thread.count}</thread.count>
+                        <dataprovider.thread.count>${dataprovider.thread.count}</dataprovider.thread.count>
+                    </systemPropertyVariables>
+
+                    <!-- TestNG DataProvider Parallelism & Listener Configuration -->
+                    <properties>
+                        <property>
+                            <name>dataproviderthreadcount</name>
+                            <value>${dataprovider.thread.count}</value>
+                        </property>
+                        <property>
+                            <name>listener</name>
+                            <value>utils.artifact.ReportingListener</value>
+                        </property>
+                    </properties>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- ================= EXECUTION PROFILES ================= -->
+    <profiles>
+        <!-- 1. TestNG Serial (Default) -->
+        <profile>
+            <id>testng-serial</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <properties>
+                <suite>testng-serial.xml</suite>
+                <execution.mode>none</execution.mode>
+                <thread.count>1</thread.count>
+                <dataprovider.thread.count>1</dataprovider.thread.count>
+            </properties>
+        </profile>
+
+        <!-- 2. TestNG Parallel (Classes/Methods + DataProviders) -->
+        <profile>
+            <id>testng-parallel</id>
+            <properties>
+                <suite>testng-parallel.xml</suite>
+                <execution.mode>classes</execution.mode>
+                <thread.count>4</thread.count>
+                <dataprovider.thread.count>3</dataprovider.thread.count>
+            </properties>
+        </profile>
+
+        <!-- 3. Cucumber BDD Serial -->
+        <profile>
+            <id>bdd-serial</id>
+            <properties>
+                <suite>bdd-serial.xml</suite>
+                <execution.mode>none</execution.mode>
+                <thread.count>1</thread.count>
+                <dataprovider.thread.count>1</dataprovider.thread.count>
+            </properties>
+        </profile>
+
+        <!-- 4. Cucumber BDD Parallel (Parallel Scenario DataProvider) -->
+        <profile>
+            <id>bdd-parallel</id>
+            <properties>
+                <suite>bdd-parallel.xml</suite>
+                <execution.mode>none</execution.mode>
+                <thread.count>1</thread.count>
+                <dataprovider.thread.count>4</dataprovider.thread.count>
+            </properties>
+        </profile>
+
+        <!-- 5. Auto-activates when -Dtest=ClassName is passed so suiteXmlFiles does not block it -->
+        <profile>
+            <id>single-test</id>
+            <activation>
+                <property>
+                    <name>test</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <suiteXmlFiles combine.self="override" />
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>
