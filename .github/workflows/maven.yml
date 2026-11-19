@@ -109,7 +109,7 @@ jobs:
       - name: Cache Selenium Drivers
         uses: actions/cache@v4
         with:
-          path: ~\.cache\selenium
+          path: ${{ env.USERPROFILE }}\.cache\selenium
           key: ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-${{ hashFiles('pom.xml') }}
           restore-keys: |
             ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-
@@ -173,8 +173,21 @@ jobs:
       - name: Configure Runtime Environment (.env)
         run: |
           Write-Output "::group::Generating src/main/java/env/.env from CI Variables"
-          if ($env:DB_PASSWORD) { Write-Output "::add-mask::$env:DB_PASSWORD" }
-          if ($env:LOGIN_PASSWORD) { Write-Output "::add-mask::$env:LOGIN_PASSWORD" }
+          $baseUrl = "$env:BASE_URL".Trim().TrimEnd('/')
+          $apiBaseUrl = "$env:API_BASE_URL".Trim().TrimEnd('/')
+          $loginUser = "$env:LOGIN_USERNAME".Trim()
+          $loginPass = "$env:LOGIN_PASSWORD".Trim()
+          $dbUrl = "$env:DB_URL".Trim()
+          $dbUser = "$env:DB_USERNAME".Trim()
+          $dbPass = "$env:DB_PASSWORD".Trim()
+
+          if ($dbPass) { Write-Output "::add-mask::$dbPass" }
+          if ($loginPass) { Write-Output "::add-mask::$loginPass" }
+
+          if ([string]::IsNullOrWhiteSpace($baseUrl) -or $baseUrl -match 'localhost|127\.0\.0\.1') {
+            Write-Error "BASE_URL is '$baseUrl'. A Windows cloud runner cannot reach localhost on your local PC. Update BASE_URL, API_BASE_URL, and DB_URL in GitHub Variables to reachable tunnel/cloud endpoints."
+            exit 1
+          }
 
           $envDir = "src/main/java/env"
           if (-not (Test-Path $envDir)) {
@@ -182,17 +195,17 @@ jobs:
           }
 
           $envContent = @(
-            "BASE_URL=$env:BASE_URL",
-            "API_BASE_URL=$env:API_BASE_URL",
-            "LOGIN_USERNAME=$env:LOGIN_USERNAME",
-            "LOGIN_PASSWORD=$env:LOGIN_PASSWORD",
-            "DB_URL=$env:DB_URL",
-            "DB_USERNAME=$env:DB_USERNAME",
-            "DB_PASSWORD=$env:DB_PASSWORD"
+            "BASE_URL=$baseUrl",
+            "API_BASE_URL=$apiBaseUrl",
+            "LOGIN_USERNAME=$loginUser",
+            "LOGIN_PASSWORD=$loginPass",
+            "DB_URL=$dbUrl",
+            "DB_USERNAME=$dbUser",
+            "DB_PASSWORD=$dbPass"
           )
 
           Set-Content -Path "$envDir/.env" -Value $envContent -Encoding UTF8
-          Write-Output "Runtime .env created successfully (BASE_URL: $env:BASE_URL | DB_URL: $env:DB_URL)"
+          Write-Output "Runtime .env created successfully (BASE_URL: $baseUrl | API_BASE_URL: $apiBaseUrl | DB_URL: $dbUrl)"
           Write-Output "::endgroup::"
 
       # =========================================================
@@ -207,7 +220,7 @@ jobs:
           }
           Write-Output "::endgroup::"
 
-     # =========================================================
+      # =========================================================
       # 7. EXECUTE SELENIUM SUITE (TESTNG OR BDD / SERIAL OR PARALLEL)
       # =========================================================
       - name: Run Selenium Automation Suite
