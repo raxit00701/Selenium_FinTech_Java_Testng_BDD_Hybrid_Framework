@@ -1,6 +1,7 @@
 package runners;
 
 import org.testng.annotations.DataProvider;
+import org.testng.ITestContext;
 
 import io.cucumber.testng.AbstractTestNGCucumberTests;
 import io.cucumber.testng.CucumberOptions;
@@ -20,9 +21,9 @@ import io.cucumber.testng.CucumberOptions;
 )
 public class ParallelTestRunner extends AbstractTestNGCucumberTests {
 
-    @Override
+   @Override
     @DataProvider(parallel = true)
-    public Object[][] scenarios() {
-        return super.scenarios();
+    public Object[][] scenarios(ITestContext context) {
+        return super.scenarios(context);
     }
 }
