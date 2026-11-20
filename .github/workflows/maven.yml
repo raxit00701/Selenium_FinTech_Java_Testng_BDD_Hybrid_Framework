@@ -168,6 +168,8 @@ jobs:
       # --------------------------------------------------
       - name: Verify installed browsers
         run: |
+          $ErrorActionPreference = "Stop"
+
           $browserPaths = @{
               chrome = @(
                   "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
@@ -308,6 +310,8 @@ jobs:
 
           foreach ($browser in $browsers) {
 
+              $browser = $browser.Trim()
+
               Write-Host ""
               Write-Host "================================="
               Write-Host "RUNNING TESTS: $browser"
@@ -335,7 +339,7 @@ jobs:
                   throw "Suite XML not found: $suiteSource"
               }
 
-              # Create a temporary suite XML for this browser.
+              # Create temporary suite XML.
               $suiteDestinationDir = Join-Path $browserArtifactDir "config"
 
               New-Item -ItemType Directory -Force -Path $suiteDestinationDir | Out-Null
@@ -359,6 +363,7 @@ jobs:
 
               Write-Host "Temporary suite XML: $suiteDestination"
 
+              # Build Maven arguments.
               $mavenArgs = @(
                   "-B"
                   "-ntp"
@@ -366,17 +371,11 @@ jobs:
                   "clean"
                   "test"
                   "-P$env:PROFILE"
-
-                  # Use temporary suite XML.
                   "-Dsuite=$suiteDestination"
-
-                  # Browser configuration.
                   "-DBROWSER=$browser"
                   "-DHEADLESS=$env:HEADLESS"
                   "-DINCOGNITO=false"
                   "-DREUSE_BROWSER=true"
-
-                  # Maven project properties.
                   "-Dthread.count=$env:THREAD_COUNT"
                   "-Ddataprovider.thread.count=$env:THREAD_COUNT"
               )
@@ -401,14 +400,41 @@ jobs:
 
               Add-Content $executionLog "Browser: $browser"
               Add-Content $executionLog "Profile: $env:PROFILE"
+              Add-Content $executionLog "Framework: $env:FRAMEWORK"
+              Add-Content $executionLog "Execution: $env:EXECUTION"
               Add-Content $executionLog "Threads: $env:THREAD_COUNT"
               Add-Content $executionLog "Suite XML: $suiteDestination"
               Add-Content $executionLog "Started: $(Get-Date)"
 
+              # ------------------------------------------
               # Execute Maven.
-              & mvn.cmd @mavenArgs *> $stdoutLog
+              #
+              # Windows PowerShell 5.1 can interpret native
+              # stderr output as a PowerShell error.
+              # Temporarily use Continue so Maven warnings
+              # do not terminate this workflow step.
+              # ------------------------------------------
 
-              $mavenExitCode = $LASTEXITCODE
+              $previousErrorActionPreference = $ErrorActionPreference
+
+              try {
+                  $ErrorActionPreference = "Continue"
+
+                  & mvn.cmd @mavenArgs *> $stdoutLog
+
+                  $mavenExitCode = $LASTEXITCODE
+              }
+              catch {
+                  Add-Content $executionLog "PowerShell execution error: $_"
+
+                  Write-Host "Maven invocation encountered an error:"
+                  Write-Host $_
+
+                  $mavenExitCode = 1
+              }
+              finally {
+                  $ErrorActionPreference = $previousErrorActionPreference
+              }
 
               Add-Content $executionLog "Finished: $(Get-Date)"
               Add-Content $executionLog "Exit code: $mavenExitCode"
@@ -419,25 +445,28 @@ jobs:
                   Get-Content $stdoutLog -Tail 150
               }
 
-              # Preserve reports before the next clean build.
+              # Preserve TestNG reports.
               if (Test-Path "test-output") {
                   Copy-Item "test-output" `
                     (Join-Path $browserArtifactDir "test-output") `
                     -Recurse -Force
               }
 
+              # Preserve Cucumber reports.
               if (Test-Path "target\cucumber-reports") {
                   Copy-Item "target\cucumber-reports" `
                     (Join-Path $browserArtifactDir "cucumber-reports") `
                     -Recurse -Force
               }
 
+              # Preserve Surefire reports.
               if (Test-Path "target\surefire-reports") {
                   Copy-Item "target\surefire-reports" `
                     (Join-Path $browserArtifactDir "surefire-reports") `
                     -Recurse -Force
               }
 
+              # Browser execution result.
               if ($mavenExitCode -ne 0) {
                   Write-Host "FAILED: $browser"
                   $failedBrowsers += $browser
@@ -447,9 +476,12 @@ jobs:
               }
           }
 
+          # Fail the workflow if any browser failed.
           if ($failedBrowsers.Count -gt 0) {
               throw "Test execution failed for: $($failedBrowsers -join ', '). Check ci-artifacts for complete stack traces."
           }
+
+          Write-Host "All browser executions completed successfully."
 
       # --------------------------------------------------
       # 6. UPLOAD ARTIFACTS
