@@ -1,3 +1,4 @@
+
 package stepdefinitions;
 
 import java.time.Duration;
@@ -35,40 +36,58 @@ public class LoginSteps {
     private static final By SUCCESS_MESSAGE =
             By.xpath("//span[normalize-space()='Signed in successfully.']");
 
-
     @Given("user navigates to the Kill Bill login page")
     public void user_navigates_to_login_page() {
 
         driver = DriverFactory.getDriver();
 
-        loginUrl = driver.getCurrentUrl();
+        Assert.assertNotNull(driver, "WebDriver should not be null.");
 
-        Assert.assertNotNull(
-                loginUrl,
-                "Login URL should not be null"
-        );
+        // Get the configured application URL.
+        loginUrl = System.getenv("BASE_URL");
 
-        System.out.println("Login page URL: " + loginUrl);
+        if (loginUrl == null || loginUrl.isBlank()) {
+            throw new IllegalStateException(
+                    "BASE_URL environment variable is missing."
+            );
+        }
+
+        loginUrl = loginUrl.trim().replaceAll("/+$", "");
+
+        System.out.println("Navigating to login page: " + loginUrl);
+
+        driver.get(loginUrl);
+
+        WebDriverWait wait =
+                new WebDriverWait(driver, Duration.ofSeconds(20));
+
+        wait.until(ExpectedConditions.visibilityOfElementLocated(USERNAME));
+
+        System.out.println("Login page loaded successfully.");
     }
-
 
     @When("user logs in with username {string} and password {string}")
     public void user_logs_in_with_credentials(
             String username,
             String password) {
 
-        driver.get(loginUrl);
-
         WebDriverWait wait =
-                new WebDriverWait(driver, Duration.ofSeconds(10));
+                new WebDriverWait(driver, Duration.ofSeconds(20));
 
-        wait.until(
-                ExpectedConditions.visibilityOfElementLocated(USERNAME)
-        ).sendKeys(username);
+        System.out.println("Current URL: " + driver.getCurrentUrl());
+        System.out.println("Page title: " + driver.getTitle());
 
-        wait.until(
-                ExpectedConditions.visibilityOfElementLocated(PASSWORD)
-        ).sendKeys(password);
+        WebElement usernameField =
+                wait.until(ExpectedConditions.visibilityOfElementLocated(USERNAME));
+
+        usernameField.clear();
+        usernameField.sendKeys(username);
+
+        WebElement passwordField =
+                wait.until(ExpectedConditions.visibilityOfElementLocated(PASSWORD));
+
+        passwordField.clear();
+        passwordField.sendKeys(password);
 
         wait.until(
                 ExpectedConditions.elementToBeClickable(LOGIN_BUTTON)
@@ -81,8 +100,7 @@ public class LoginSteps {
                     SUCCESS_MESSAGE
             }) {
 
-                for (WebElement element :
-                        webDriver.findElements(locator)) {
+                for (WebElement element : webDriver.findElements(locator)) {
 
                     if (element.isDisplayed()) {
                         return element;
@@ -101,13 +119,12 @@ public class LoginSteps {
         System.out.println("--------------------------------");
     }
 
-
     @Then("login response should be either successful or invalid")
     public void validate_login_response() {
 
         boolean validResponse =
-                actualMessage.equals("Invalid username or password.")
-                || actualMessage.equals("Signed in successfully.");
+                "Invalid username or password.".equals(actualMessage)
+                || "Signed in successfully.".equals(actualMessage);
 
         Assert.assertTrue(
                 validResponse,
