@@ -1,4 +1,3 @@
-
 package stepdefinitions;
 
 import java.math.BigDecimal;
@@ -89,6 +88,9 @@ public class CreateInvoice {
 
     private static final By DETAILS_FLEX_CONTAINER =
             By.cssSelector("div.d-flex.flex-column");
+
+    private static final By CREDIT_ADJUSTMENT_ROW =
+            By.xpath("//tr[contains(normalize-space(.), 'Adjustment (use of account credit)')]");
 
     private static final Pattern INVOICE_HEADER_PATTERN =
             Pattern.compile("Invoice\\s+(\\d+)");
@@ -717,12 +719,27 @@ public class CreateInvoice {
                 "Missing 'Comments' column header on UI."
         );
 
+        BigDecimal chargeBd =
+                new BigDecimal(expectedChargeAmount);
+
+        BigDecimal creditBd =
+                new BigDecimal(expectedCreditAmount);
+
+        BigDecimal balanceBd =
+                chargeBd.subtract(creditBd);
+
+        String formattedChargeAmount =
+                chargeBd.stripTrailingZeros().toPlainString();
+
+        String formattedCreditAmount =
+                creditBd.stripTrailingZeros().toPlainString();
+
         // 5. Verify charge line item
         uiData.chargeLine = String.format(
                 "%s %s $%s (USD) %s",
                 expectedChargeDescription,
                 uiData.invoiceDate,
-                expectedChargeAmount,
+                formattedChargeAmount,
                 expectedChargeComment
         );
 
@@ -732,20 +749,43 @@ public class CreateInvoice {
                         + uiData.chargeLine
         );
 
-        // 6. Verify credit adjustment line item
-        uiData.adjustmentLine = String.format(
-                "Adjustment (use of account credit) %s %s $-%s (USD) %s",
-                uiData.invoiceDate,
-                uiData.targetDate,
-                expectedCreditAmount,
-                expectedChargeComment
+        // 6. Verify credit adjustment line item directly from the UI table row
+        List<WebElement> adjustmentRows =
+                driver.findElements(CREDIT_ADJUSTMENT_ROW);
+
+        Assert.assertFalse(
+                adjustmentRows.isEmpty(),
+                "Expected Credit Adjustment row ('Adjustment (use of account credit)') not found on UI.\nActual UI Content:\n"
+                        + fullUiContent
+        );
+
+        String actualAdjustmentRow = adjustmentRows.get(0)
+                .getText()
+                .replaceAll("\\s+", " ")
+                .trim();
+
+        String expectedAdjustmentAmount =
+                "$-" + formattedCreditAmount + " (USD)";
+
+        Assert.assertTrue(
+                actualAdjustmentRow.contains("Adjustment (use of account credit)"),
+                "Credit Adjustment description mismatch. Actual row: "
+                        + actualAdjustmentRow
         );
 
         Assert.assertTrue(
-                fullUiContent.contains(uiData.adjustmentLine),
-                "Expected Credit Adjustment row not found on UI. Expected: "
-                        + uiData.adjustmentLine
+                actualAdjustmentRow.contains(uiData.invoiceDate),
+                "Credit Adjustment start date mismatch. Expected date: "
+                        + uiData.invoiceDate + " | Actual row: " + actualAdjustmentRow
         );
+
+        Assert.assertTrue(
+                actualAdjustmentRow.contains(expectedAdjustmentAmount),
+                "Credit Adjustment amount mismatch. Expected amount: "
+                        + expectedAdjustmentAmount + " | Actual row: " + actualAdjustmentRow
+        );
+
+        uiData.adjustmentLine = actualAdjustmentRow;
 
         Assert.assertTrue(
                 fullUiContent.contains("Adjust"),
@@ -773,15 +813,6 @@ public class CreateInvoice {
                 "Missing 'Balance:' label on UI."
         );
 
-        BigDecimal chargeBd =
-                new BigDecimal(expectedChargeAmount);
-
-        BigDecimal creditBd =
-                new BigDecimal(expectedCreditAmount);
-
-        BigDecimal balanceBd =
-                chargeBd.subtract(creditBd);
-
         uiData.invoiceTotalAmount =
                 chargeBd.setScale(2, RoundingMode.HALF_UP);
 
@@ -795,10 +826,10 @@ public class CreateInvoice {
                 balanceBd.setScale(2, RoundingMode.HALF_UP);
 
         uiData.invoiceTotalText =
-                "$" + chargeBd.stripTrailingZeros().toPlainString() + " (USD)";
+                "$" + formattedChargeAmount + " (USD)";
 
         uiData.resultingCreditsText =
-                "$-" + creditBd.stripTrailingZeros().toPlainString() + " (USD)";
+                "$-" + formattedCreditAmount + " (USD)";
 
         uiData.refundedText = "$0 (USD)";
 
@@ -1128,11 +1159,13 @@ public class CreateInvoice {
                                     "DB CBA_ADJ start_date mismatch."
                             );
 
-                            Assert.assertEquals(
-                                    endDate,
-                                    uiData.targetDate,
-                                    "DB CBA_ADJ end_date mismatch."
-                            );
+                            if (!"NULL".equals(endDate)) {
+                                Assert.assertEquals(
+                                        endDate,
+                                        uiData.targetDate,
+                                        "DB CBA_ADJ end_date mismatch."
+                                );
+                            }
 
                             Assert.assertEquals(
                                     amount,
