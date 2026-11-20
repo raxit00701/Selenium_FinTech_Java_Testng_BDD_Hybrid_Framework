@@ -20,6 +20,8 @@ public class ElementTracker implements WebDriverListener {
 
     private static final ThreadLocal<WebElement> LAST_FOUND_ELEMENT = new ThreadLocal<>();
     private static final ThreadLocal<WebElement> LAST_INTERACTED_ELEMENT = new ThreadLocal<>();
+    // Whichever element was found OR interacted with most recently (what getLastElement() returns)
+    private static final ThreadLocal<WebElement> LAST_ELEMENT = new ThreadLocal<>();
     private static final ThreadLocal<By> LAST_LOCATOR = new ThreadLocal<>();
     private static final ThreadLocal<By> FAILED_LOCATOR = new ThreadLocal<>();
     private static final ThreadLocal<String> LAST_URL = new ThreadLocal<>();
@@ -56,6 +58,7 @@ public class ElementTracker implements WebDriverListener {
     public void afterFindElement(WebDriver driver, By locator, WebElement result) {
         if (result != null) {
             LAST_FOUND_ELEMENT.set(result);
+            LAST_ELEMENT.set(result);
             LAST_LOCATOR.set(locator);
             FAILED_LOCATOR.remove();
             LOGGER.info("Found element successfully: {}", locator);
@@ -74,6 +77,7 @@ public class ElementTracker implements WebDriverListener {
     public void afterFindElements(WebDriver driver, By locator, List<WebElement> result) {
         if (result != null && !result.isEmpty()) {
             LAST_FOUND_ELEMENT.set(result.get(0));
+            LAST_ELEMENT.set(result.get(0));
             LAST_LOCATOR.set(locator);
             FAILED_LOCATOR.remove();
             LOGGER.info("Found {} element(s) for locator: {}", result.size(), locator);
@@ -129,6 +133,7 @@ public class ElementTracker implements WebDriverListener {
                     failedBy, cause != null ? cause.getMessage().split("\n")[0] : "Unknown");
         } else if (target instanceof WebElement failedElement) {
             LAST_INTERACTED_ELEMENT.set(failedElement);
+            LAST_ELEMENT.set(failedElement);
             LOGGER.error("Element action '{}' failed | Reason: {}",
                     methodName, cause != null ? cause.getMessage().split("\n")[0] : "Unknown");
         }
@@ -171,6 +176,7 @@ public class ElementTracker implements WebDriverListener {
         if (element != null) {
             LAST_INTERACTED_ELEMENT.set(element);
             LAST_FOUND_ELEMENT.set(element);
+            LAST_ELEMENT.set(element);
         }
     }
 
@@ -182,7 +188,16 @@ public class ElementTracker implements WebDriverListener {
         }
     }
 
+    /**
+     * The element touched most recently, whether it was found or interacted with.
+     * (Previously a stale "interacted" element always beat a newer "found" one, so a failed
+     * assertion on e.g. a welcome message highlighted the earlier Sign In button instead.)
+     */
     public static WebElement getLastElement() {
+        WebElement latest = LAST_ELEMENT.get();
+        if (latest != null) {
+            return latest;
+        }
         WebElement interacted = LAST_INTERACTED_ELEMENT.get();
         return interacted != null ? interacted : LAST_FOUND_ELEMENT.get();
     }
@@ -206,6 +221,7 @@ public class ElementTracker implements WebDriverListener {
     public static void clear() {
         LAST_FOUND_ELEMENT.remove();
         LAST_INTERACTED_ELEMENT.remove();
+        LAST_ELEMENT.remove();
         LAST_LOCATOR.remove();
         FAILED_LOCATOR.remove();
         LAST_URL.remove();
