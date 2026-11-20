@@ -1,14 +1,14 @@
 
-name: Selenium Java Automation
+name: Selenium Java CI - Windows 11
 
 on:
   workflow_dispatch:
     inputs:
       framework:
-        description: "Select testing framework"
+        description: "Select automation framework"
         required: true
-        default: "bdd"
         type: choice
+        default: bdd
         options:
           - bdd
           - testng
@@ -16,8 +16,8 @@ on:
       execution_mode:
         description: "Select execution mode"
         required: true
-        default: "serial"
         type: choice
+        default: serial
         options:
           - serial
           - parallel
@@ -25,23 +25,24 @@ on:
       browser:
         description: "Select browser"
         required: true
-        default: "chrome"
         type: choice
+        default: chrome
         options:
           - chrome
           - edge
           - firefox
+          - all
 
       headless:
-        description: "Run browser in headless mode"
+        description: "Enable headless execution"
         required: true
-        default: true
         type: boolean
+        default: true
 
       test_target:
-        description: "TestNG class name or BDD feature file path (leave empty for all)"
+        description: "BDD feature path or TestNG class name. Clear to run the complete suite."
         required: false
-        default: ""
+        default: "src/test/resources/features/Login_Test.feature"
 
   push:
     branches:
@@ -55,14 +56,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: selenium-automation-${{ github.ref }}
+  group: selenium-ci-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  automation:
-    name: Selenium Automation Tests
+  selenium-tests:
+    name: Selenium Automation
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     env:
       API_BASE_URL: ${{ vars.API_BASE_URL }}
@@ -74,58 +75,64 @@ jobs:
       LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
 
     steps:
+
+      # ----------------------------------------
+      # 1. CHECKOUT
+      # ----------------------------------------
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      # ----------------------------------------
+      # 2. JAVA SETUP
+      # ----------------------------------------
+
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
           cache: maven
 
-      - name: Verify Java and Maven
+      # ----------------------------------------
+      # 3. VERIFY ENVIRONMENT
+      # ----------------------------------------
+
+      - name: Verify Windows Java and Maven
         shell: powershell
         run: |
-          Write-Host "Java Version:"
+          Write-Host "================================="
+          Write-Host "WINDOWS SELENIUM CI ENVIRONMENT"
+          Write-Host "================================="
+
+          Write-Host "Java:"
           java -version
 
-          Write-Host "Maven Version:"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Java installation is not working."
+          }
+
+          Write-Host "Maven:"
           mvn -version
 
-          Write-Host "Working Directory:"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Maven is not installed or not available in PATH."
+          }
+
+          Write-Host "Project:"
           Get-Location
 
-      - name: Verify Installed Browsers
-        shell: powershell
-        run: |
-          $browsers = @(
-            "chrome",
-            "msedge",
-            "firefox"
-          )
-
-          foreach ($browser in $browsers) {
-            $command = Get-Command $browser -ErrorAction SilentlyContinue
-
-            if ($command) {
-              Write-Host "$browser is available."
-            }
-            else {
-              Write-Host "$browser command was not found in PATH."
-            }
+          if (-not (Test-Path "pom.xml")) {
+            throw "pom.xml was not found."
           }
 
-      - name: Resolve Maven Dependencies
-        shell: powershell
-        run: |
-          mvn -B -ntp dependency:resolve
+          Write-Host "pom.xml verified."
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "Maven dependency resolution failed."
-          }
+      # ----------------------------------------
+      # 4. SELECT TEST CONFIGURATION
+      # ----------------------------------------
 
-      - name: Select Test Configuration
+      - name: Configure Test Execution
         id: config
         shell: powershell
         run: |
@@ -133,174 +140,363 @@ jobs:
           $execution = "serial"
           $browser = "chrome"
           $headless = "true"
-          $target = ""
+          $target = "src/test/resources/features/Login_Test.feature"
 
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+
             $framework = "${{ inputs.framework }}"
             $execution = "${{ inputs.execution_mode }}"
             $browser = "${{ inputs.browser }}"
             $target = "${{ inputs.test_target }}"
-            
+
             if ("${{ inputs.headless }}" -eq "false") {
               $headless = "false"
             }
           }
 
-          if ([string]::IsNullOrWhiteSpace($framework)) {
-            $framework = "bdd"
-          }
-
-          if ([string]::IsNullOrWhiteSpace($execution)) {
-            $execution = "serial"
-          }
-
-          if ([string]::IsNullOrWhiteSpace($browser)) {
-            $browser = "chrome"
-          }
-
           if ($framework -notin @("bdd", "testng")) {
-            throw "Invalid framework: $framework"
+            throw "Invalid framework selected."
           }
 
           if ($execution -notin @("serial", "parallel")) {
-            throw "Invalid execution mode: $execution"
+            throw "Invalid execution mode selected."
           }
 
-          if ($browser -notin @("chrome", "edge", "firefox")) {
-            throw "Invalid browser: $browser"
+          if ($browser -notin @("chrome", "edge", "firefox", "all")) {
+            throw "Invalid browser selected."
           }
 
-          if ($framework -eq "bdd") {
-            $profile = "bdd-$execution"
+          # BDD uses a feature file by default.
+          # Clear the field to execute all features.
+          # For TestNG, enter a class name.
+          if ($framework -eq "testng" -and
+              $target -eq "src/test/resources/features/Login_Test.feature") {
+            $target = ""
           }
-          else {
-            $profile = "testng-$execution"
-          }
+
+          $profile = "$framework-$execution"
 
           "FRAMEWORK=$framework" >> $env:GITHUB_ENV
           "EXECUTION_MODE=$execution" >> $env:GITHUB_ENV
-          "BROWSER=$browser" >> $env:GITHUB_ENV
+          "SELECTED_BROWSER=$browser" >> $env:GITHUB_ENV
           "HEADLESS=$headless" >> $env:GITHUB_ENV
-          "PROFILE=$profile" >> $env:GITHUB_ENV
+          "MAVEN_PROFILE=$profile" >> $env:GITHUB_ENV
           "TEST_TARGET=$target" >> $env:GITHUB_ENV
 
-          Write-Host "Framework: $framework"
-          Write-Host "Execution: $execution"
-          Write-Host "Browser: $browser"
-          Write-Host "Headless: $headless"
-          Write-Host "Maven Profile: $profile"
-          Write-Host "Test Target: $target"
+          Write-Host "Framework       : $framework"
+          Write-Host "Execution       : $execution"
+          Write-Host "Browser         : $browser"
+          Write-Host "Headless        : $headless"
+          Write-Host "Maven Profile   : $profile"
+          Write-Host "Test Target     : $target"
 
-      - name: Execute Automation Tests
+      # ----------------------------------------
+      # 5. INSTALL / VERIFY BROWSERS
+      # ----------------------------------------
+
+      - name: Install and Verify Browsers
         shell: powershell
         run: |
-          $mavenArgs = @(
-            "-B",
-            "-ntp",
-            "clean",
-            "test",
-            "-P$env:PROFILE",
-            "-DBROWSER=$env:BROWSER",
-            "-DHEADLESS=$env:HEADLESS",
-            "-DINCOGNITO=false",
-            "-DREUSE_BROWSER=true"
-          )
+          $selected = $env:SELECTED_BROWSER
 
-          if (-not [string]::IsNullOrWhiteSpace($env:TEST_TARGET)) {
+          if ($selected -eq "all") {
+            $browsers = @("chrome", "edge", "firefox")
+          }
+          else {
+            $browsers = @($selected)
+          }
 
-            if ($env:FRAMEWORK -eq "testng") {
-              Write-Host "Executing individual TestNG class: $env:TEST_TARGET"
+          function Get-BrowserExecutable($browser) {
 
-              $className = $env:TEST_TARGET.Trim()
+            $paths = switch ($browser) {
 
-              if ($className -notmatch '^[A-Za-z0-9_.$*]+$') {
-                throw "Invalid TestNG class name."
+              "chrome" {
+                @(
+                  "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+                  "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+                  "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+                )
               }
 
-              $mavenArgs += "-Dtest=$className"
+              "edge" {
+                @(
+                  "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+                  "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+                )
+              }
+
+              "firefox" {
+                @(
+                  "$env:ProgramFiles\Mozilla Firefox\firefox.exe",
+                  "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe"
+                )
+              }
             }
-            elseif ($env:FRAMEWORK -eq "bdd") {
-              Write-Host "Executing individual BDD feature: $env:TEST_TARGET"
 
-              $feature = $env:TEST_TARGET.Trim()
+            foreach ($path in $paths) {
+              if (Test-Path $path) {
+                return $path
+              }
+            }
 
-              if (-not (Test-Path -LiteralPath $feature -PathType Leaf)) {
-                throw "BDD feature file not found: $feature"
+            return $null
+          }
+
+          foreach ($browser in $browsers) {
+
+            $executable = Get-BrowserExecutable $browser
+
+            if (-not $executable) {
+
+              Write-Host "$browser is missing. Attempting installation."
+
+              if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+                throw "winget is unavailable. Install $browser manually on the runner."
               }
 
-              if ($feature -notmatch '\.feature$') {
-                throw "BDD target must be a .feature file."
+              $package = switch ($browser) {
+                "chrome"  { "Google.Chrome" }
+                "edge"    { "Microsoft.Edge" }
+                "firefox" { "Mozilla.Firefox" }
               }
 
-              $mavenArgs += "-Dcucumber.features=$feature"
+              winget install --id $package --exact --silent `
+                --accept-package-agreements `
+                --accept-source-agreements
+
+              if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+                throw "Installation failed for $browser."
+              }
+
+              $executable = Get-BrowserExecutable $browser
+            }
+
+            if (-not $executable) {
+              throw "$browser executable could not be located after installation."
+            }
+
+            Write-Host "$browser verified: $executable"
+          }
+
+      # ----------------------------------------
+      # 6. RESOLVE POM DEPENDENCIES
+      # ----------------------------------------
+
+      - name: Resolve Maven Dependencies
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "ci-artifacts/setup" | Out-Null
+
+          mvn -B -ntp dependency:resolve 2>&1 |
+            Tee-Object -FilePath "ci-artifacts/setup/dependency-resolution.log"
+
+          $result = $LASTEXITCODE
+
+          if ($result -ne 0) {
+            throw "Maven dependency resolution failed."
+          }
+
+          Write-Host "Maven dependencies resolved successfully."
+
+      # ----------------------------------------
+      # 7. EXECUTE SELENIUM TESTS
+      # ----------------------------------------
+
+      - name: Run Selenium Automation
+        shell: powershell
+        run: |
+          $framework = $env:FRAMEWORK
+          $profile = $env:MAVEN_PROFILE
+          $target = $env:TEST_TARGET
+          $headless = $env:HEADLESS
+
+          if ($env:SELECTED_BROWSER -eq "all") {
+            $browsers = @("chrome", "edge", "firefox")
+          }
+          else {
+            $browsers = @($env:SELECTED_BROWSER)
+          }
+
+          $failedBrowsers = @()
+
+          New-Item -ItemType Directory -Force -Path "ci-artifacts" | Out-Null
+
+          foreach ($browser in $browsers) {
+
+            Write-Host ""
+            Write-Host "========================================"
+            Write-Host "STARTING $browser AUTOMATION"
+            Write-Host "========================================"
+
+            $mavenArgs = @(
+              "-B",
+              "-ntp",
+              "clean",
+              "test",
+              "-P$profile",
+              "-DBROWSER=$browser",
+              "-DHEADLESS=$headless",
+              "-DINCOGNITO=false",
+              "-DREUSE_BROWSER=true"
+            )
+
+            if (-not [string]::IsNullOrWhiteSpace($target)) {
+
+              if ($framework -eq "testng") {
+
+                $className = $target.Trim()
+
+                if ($className -notmatch '^[A-Za-z0-9_.$*]+$') {
+                  throw "Invalid TestNG class name: $className"
+                }
+
+                Write-Host "TestNG class: $className"
+
+                $mavenArgs += "-Dtest=$className"
+              }
+
+              elseif ($framework -eq "bdd") {
+
+                $feature = $target.Trim()
+
+                if (-not (Test-Path -LiteralPath $feature -PathType Leaf)) {
+                  throw "Feature file does not exist: $feature"
+                }
+
+                if ($feature -notmatch '\.feature$') {
+                  throw "BDD target must be a .feature file."
+                }
+
+                Write-Host "BDD feature: $feature"
+
+                $mavenArgs += "-Dcucumber.features=$feature"
+              }
+            }
+            else {
+              Write-Host "Executing complete suite."
+            }
+
+            Write-Host "Maven profile: $profile"
+            Write-Host "Browser: $browser"
+            Write-Host "Headless: $headless"
+
+            Write-Host "Command:"
+            Write-Host "mvn $($mavenArgs -join ' ')"
+
+            $logFile = "ci-artifacts/$browser-maven.log"
+
+            & mvn @mavenArgs 2>&1 |
+              Tee-Object -FilePath $logFile
+
+            $testExitCode = $LASTEXITCODE
+
+            # Save reports separately for every browser.
+            $browserArtifact = "ci-artifacts/$browser"
+
+            New-Item -ItemType Directory -Force `
+              -Path $browserArtifact | Out-Null
+
+            if (Test-Path "test-output") {
+              Copy-Item "test-output" `
+                "$browserArtifact/test-output" -Recurse -Force
+            }
+
+            if (Test-Path "target/cucumber-reports") {
+              New-Item -ItemType Directory -Force `
+                -Path "$browserArtifact/target" | Out-Null
+
+              Copy-Item "target/cucumber-reports" `
+                "$browserArtifact/target/cucumber-reports" `
+                -Recurse -Force
+            }
+
+            if (Test-Path "target/surefire-reports") {
+              New-Item -ItemType Directory -Force `
+                -Path "$browserArtifact/target" | Out-Null
+
+              Copy-Item "target/surefire-reports" `
+                "$browserArtifact/target/surefire-reports" `
+                -Recurse -Force
+            }
+
+            if ($testExitCode -ne 0) {
+              Write-Host "$browser execution FAILED."
+              $failedBrowsers += $browser
+            }
+            else {
+              Write-Host "$browser execution PASSED."
             }
           }
 
-          Write-Host "Running Maven:"
-          Write-Host "mvn $($mavenArgs -join ' ')"
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "SELENIUM EXECUTION COMPLETED"
+          Write-Host "========================================"
 
-          & mvn @mavenArgs 2>&1 | Tee-Object -FilePath "maven-execution.log"
-
-          $testExitCode = $LASTEXITCODE
-
-          if ($testExitCode -ne 0) {
-            Write-Error "Automation tests failed. Maven exit code: $testExitCode"
-            exit $testExitCode
+          if ($failedBrowsers.Count -gt 0) {
+            Write-Host "Failed browsers: $($failedBrowsers -join ', ')"
+            exit 1
           }
 
-          Write-Host "Automation execution completed successfully."
+          Write-Host "All selected browser executions passed."
+
+      # ----------------------------------------
+      # 8. TESTNG DASHBOARD ARTIFACT
+      # ----------------------------------------
 
       - name: Upload TestNG Execution Dashboard
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: testng-execution-dashboard
-          path: test-output/dashboard/ExecutionDashboard.html
+          name: TestNG-Execution-Dashboard
+          path: ci-artifacts/**/test-output/dashboard/ExecutionDashboard.html
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload TestNG Reports
+      # ----------------------------------------
+      # 9. CUCUMBER HTML REPORT
+      # ----------------------------------------
+
+      - name: Upload Cucumber HTML Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: testng-reports
-          path: |
-            test-output/
+          name: Cucumber-BDD-HTML-Report
+          path: ci-artifacts/**/target/cucumber-reports/cucumber.html
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload Cucumber BDD Reports
+      # ----------------------------------------
+      # 10. COMPLETE AUTOMATION REPORTS
+      # ----------------------------------------
+
+      - name: Upload Complete Automation Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cucumber-reports
-          path: |
-            target/cucumber-reports/
+          name: Selenium-Automation-Reports
+          path: ci-artifacts/
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload Maven Logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: maven-execution-logs
-          path: |
-            maven-execution.log
-            target/surefire-reports/
-          if-no-files-found: warn
-          retention-days: 14
+      # ----------------------------------------
+      # 11. EXECUTION SUMMARY
+      # ----------------------------------------
 
-      - name: Execution Summary
+      - name: Automation Execution Summary
         if: always()
         shell: powershell
         run: |
+          Write-Host ""
           Write-Host "======================================"
-          Write-Host "SELENIUM AUTOMATION EXECUTION SUMMARY"
+          Write-Host "SELENIUM CI EXECUTION SUMMARY"
           Write-Host "======================================"
-          Write-Host "Framework: $env:FRAMEWORK"
-          Write-Host "Execution Mode: $env:EXECUTION_MODE"
-          Write-Host "Browser: $env:BROWSER"
-          Write-Host "Headless: $env:HEADLESS"
-          Write-Host "Maven Profile: $env:PROFILE"
-          Write-Host "Test Target: $env:TEST_TARGET"
+
+          Write-Host "Framework      : $env:FRAMEWORK"
+          Write-Host "Execution Mode : $env:EXECUTION_MODE"
+          Write-Host "Browser        : $env:SELECTED_BROWSER"
+          Write-Host "Headless       : $env:HEADLESS"
+          Write-Host "Maven Profile  : $env:MAVEN_PROFILE"
+          Write-Host "Test Target    : $env:TEST_TARGET"
+
           Write-Host "======================================"
