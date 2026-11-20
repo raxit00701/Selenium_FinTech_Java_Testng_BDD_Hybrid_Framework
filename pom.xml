@@ -278,7 +278,7 @@
             <properties>
                 <suite>testng-parallel.xml</suite>
                 <thread.count>4</thread.count>
-                <dataprovider.thread.count>3</dataprovider.thread.count>
+                <dataprovider.thread.count>2</dataprovider.thread.count>
             </properties>
         </profile>
 
@@ -300,7 +300,7 @@
             <properties>
                 <suite>bdd-parallel.xml</suite>
                 <thread.count>1</thread.count>
-                <dataprovider.thread.count>4</dataprovider.thread.count>
+                <dataprovider.thread.count>2</dataprovider.thread.count>
             </properties>
         </profile>
 
