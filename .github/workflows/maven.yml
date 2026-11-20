@@ -174,10 +174,12 @@ jobs:
                   "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
                   "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
               )
+
               edge = @(
                   "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe",
                   "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
               )
+
               firefox = @(
                   "$env:ProgramFiles\Mozilla Firefox\firefox.exe",
                   "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe"
@@ -211,8 +213,11 @@ jobs:
           $execution = "${{ github.event_name == 'workflow_dispatch' && inputs.execution || 'serial' }}".ToLower()
           $browser = "${{ github.event_name == 'workflow_dispatch' && inputs.browser || 'chrome' }}".ToLower()
           $headless = "${{ github.event_name == 'workflow_dispatch' && inputs.headless || 'true' }}".ToLower()
+
           $className = "${{ github.event_name == 'workflow_dispatch' && inputs.class_name || '' }}".Trim()
+
           $featureFile = "${{ github.event_name == 'workflow_dispatch' && inputs.feature_file || 'src/test/resources/features/Login_Test.feature' }}".Trim()
+
           $threadCount = "${{ github.event_name == 'workflow_dispatch' && inputs.thread_count || '4' }}".Trim()
 
           if ($framework -notin @("bdd", "testng")) {
@@ -250,7 +255,11 @@ jobs:
           if ($framework -eq "bdd") {
               $className = ""
 
-              if ($featureFile -and -not (Test-Path $featureFile)) {
+              if (-not $featureFile) {
+                  throw "BDD feature file is required."
+              }
+
+              if (-not (Test-Path $featureFile)) {
                   throw "Feature file not found: $featureFile"
               }
           }
@@ -306,12 +315,49 @@ jobs:
 
               $browserArtifactDir = Join-Path "ci-artifacts" $browser
 
-              New-Item -ItemType Directory -Force `
-                -Path $browserArtifactDir | Out-Null
+              New-Item -ItemType Directory -Force -Path $browserArtifactDir | Out-Null
 
               $stdoutLog = Join-Path $browserArtifactDir "maven-output.log"
-
               $executionLog = Join-Path $browserArtifactDir "execution.log"
+
+              # Select the correct suite XML.
+              $suiteSource = switch ($env:PROFILE) {
+                  "testng-serial"   { "testng-serial.xml" }
+                  "testng-parallel" { "testng-parallel.xml" }
+                  "bdd-serial"      { "bdd-serial.xml" }
+                  "bdd-parallel"    { "bdd-parallel.xml" }
+                  default {
+                      throw "Unknown Maven profile: $env:PROFILE"
+                  }
+              }
+
+              if (-not (Test-Path $suiteSource)) {
+                  throw "Suite XML not found: $suiteSource"
+              }
+
+              # Create a temporary suite XML for this browser.
+              $suiteDestinationDir = Join-Path $browserArtifactDir "config"
+
+              New-Item -ItemType Directory -Force -Path $suiteDestinationDir | Out-Null
+
+              $suiteDestination = Join-Path $suiteDestinationDir $suiteSource
+
+              [xml]$suiteXml = Get-Content $suiteSource -Raw
+
+              if ($env:EXECUTION -eq "parallel") {
+
+                  if ($env:FRAMEWORK -eq "testng") {
+                      $suiteXml.suite.SetAttribute("thread-count", $env:THREAD_COUNT)
+                  }
+
+                  if ($env:FRAMEWORK -eq "bdd") {
+                      $suiteXml.suite.SetAttribute("data-provider-thread-count", $env:THREAD_COUNT)
+                  }
+              }
+
+              $suiteXml.Save((Join-Path (Get-Location).Path $suiteDestination))
+
+              Write-Host "Temporary suite XML: $suiteDestination"
 
               $mavenArgs = @(
                   "-B"
@@ -321,29 +367,19 @@ jobs:
                   "test"
                   "-P$env:PROFILE"
 
-                  # Browser configuration
+                  # Use temporary suite XML.
+                  "-Dsuite=$suiteDestination"
+
+                  # Browser configuration.
                   "-DBROWSER=$browser"
                   "-DHEADLESS=$env:HEADLESS"
                   "-DINCOGNITO=false"
                   "-DREUSE_BROWSER=true"
 
-                  # Maven project properties
+                  # Maven project properties.
                   "-Dthread.count=$env:THREAD_COUNT"
                   "-Ddataprovider.thread.count=$env:THREAD_COUNT"
-                  "-Dexecution.mode=none"
-
-                  # TestNG/Surefire standard properties
-                  "-Dthreadcount=$env:THREAD_COUNT"
-                  "-Ddataproviderthreadcount=$env:THREAD_COUNT"
               )
-
-              if ($env:EXECUTION -eq "parallel") {
-                  $mavenArgs = $mavenArgs | Where-Object {
-                      $_ -ne "-Dexecution.mode=none"
-                  }
-
-                  $mavenArgs += "-Dexecution.mode=classes"
-              }
 
               if ($env:FRAMEWORK -eq "testng" -and $env:CLASS_NAME) {
                   $mavenArgs += "-Dtest=$env:CLASS_NAME"
@@ -366,11 +402,10 @@ jobs:
               Add-Content $executionLog "Browser: $browser"
               Add-Content $executionLog "Profile: $env:PROFILE"
               Add-Content $executionLog "Threads: $env:THREAD_COUNT"
+              Add-Content $executionLog "Suite XML: $suiteDestination"
               Add-Content $executionLog "Started: $(Get-Date)"
 
-              # Invoke Maven directly through PowerShell.
-              # Capture all output in one file to preserve the full
-              # Java exception and avoid NativeCommandError handling.
+              # Execute Maven.
               & mvn.cmd @mavenArgs *> $stdoutLog
 
               $mavenExitCode = $LASTEXITCODE
