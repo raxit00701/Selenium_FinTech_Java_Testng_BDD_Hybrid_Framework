@@ -99,12 +99,13 @@ jobs:
       # 2. JAVA SETUP
       # ----------------------------------------
 
-      - name: Setup Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
           cache: maven
+          cache-dependency-path: pom.xml
 
       # ----------------------------------------
       # 3. VERIFY ENVIRONMENT
