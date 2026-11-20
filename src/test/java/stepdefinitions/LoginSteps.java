@@ -1,4 +1,3 @@
-
 package stepdefinitions;
 
 import java.time.Duration;
@@ -14,12 +13,18 @@ import base.DriverFactory;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.When;
 import io.cucumber.java.en.Then;
+import io.github.cdimascio.dotenv.Dotenv;
 
 public class LoginSteps {
 
     private WebDriver driver;
     private String loginUrl;
     private String actualMessage;
+
+    private static final Dotenv dotenv = Dotenv.configure()
+            .directory("src/main/java/env")
+            .ignoreIfMissing()
+            .load();
 
     private static final By USERNAME =
             By.id("user_kb_username");
@@ -43,12 +48,15 @@ public class LoginSteps {
 
         Assert.assertNotNull(driver, "WebDriver should not be null.");
 
-        // Get the configured application URL.
-        loginUrl = System.getenv("BASE_URL");
+        // Read from src/main/java/env/.env first, then system environment.
+        loginUrl = dotenv.get("BASE_URL");
+        if (loginUrl == null || loginUrl.isBlank()) {
+            loginUrl = System.getenv("BASE_URL");
+        }
 
         if (loginUrl == null || loginUrl.isBlank()) {
             throw new IllegalStateException(
-                    "BASE_URL environment variable is missing."
+                    "BASE_URL is missing in src/main/java/env/.env and system environment."
             );
         }
 
