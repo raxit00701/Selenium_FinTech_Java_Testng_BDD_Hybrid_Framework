@@ -49,10 +49,10 @@ on:
         default: ""
 
       feature_file:
-        description: "BDD feature file"
+        description: "Optional BDD feature file override (leave empty to use suite runner)"
         required: false
         type: string
-        default: "src/test/resources/features/Login_Test.feature"
+        default: ""
 
       thread_count:
         description: "Parallel thread count"
@@ -217,35 +217,40 @@ jobs:
           $headless = "${{ github.event_name == 'workflow_dispatch' && inputs.headless || 'true' }}".ToLower()
 
           $className = "${{ github.event_name == 'workflow_dispatch' && inputs.class_name || '' }}".Trim()
-
-          $featureFile = "${{ github.event_name == 'workflow_dispatch' && inputs.feature_file || 'src/test/resources/features/Login_Test.feature' }}".Trim()
-
+          $featureFile = "${{ github.event_name == 'workflow_dispatch' && inputs.feature_file || '' }}".Trim()
           $threadCount = "${{ github.event_name == 'workflow_dispatch' && inputs.thread_count || '4' }}".Trim()
 
+          # Validate framework.
           if ($framework -notin @("bdd", "testng")) {
               throw "Invalid framework."
           }
 
+          # Validate execution mode.
           if ($execution -notin @("serial", "parallel")) {
               throw "Invalid execution mode."
           }
 
+          # Validate browser.
           if ($browser -notin @("chrome", "edge", "firefox", "all")) {
               throw "Invalid browser."
           }
 
+          # Validate headless.
           if ($headless -notin @("true", "false")) {
               throw "Invalid headless setting."
           }
 
+          # Validate thread count.
           if ($threadCount -notmatch '^[1-9][0-9]*$') {
               throw "Thread count must be a positive integer."
           }
 
+          # Serial execution always uses one thread.
           if ($execution -eq "serial") {
               $threadCount = "1"
           }
 
+          # TestNG configuration.
           if ($framework -eq "testng") {
               $featureFile = ""
 
@@ -254,20 +259,29 @@ jobs:
               }
           }
 
+          # BDD configuration.
           if ($framework -eq "bdd") {
               $className = ""
 
-              if (-not $featureFile) {
-                  throw "BDD feature file is required."
-              }
+              # Feature file is optional.
+              # Empty means use the runner from the suite XML.
+              if ($featureFile) {
+                  if (-not (Test-Path $featureFile)) {
+                      throw "Feature file not found: $featureFile"
+                  }
 
-              if (-not (Test-Path $featureFile)) {
-                  throw "Feature file not found: $featureFile"
+                  Write-Host "Custom BDD feature selected: $featureFile"
+              }
+              else {
+                  Write-Host "No custom feature selected."
+                  Write-Host "Using the runner configured in the BDD suite XML."
               }
           }
 
+          # Select Maven profile.
           $profile = "$framework-$execution"
 
+          # Select browsers.
           if ($browser -eq "all") {
               $browsers = @("chrome", "edge", "firefox")
           }
@@ -275,6 +289,7 @@ jobs:
               $browsers = @($browser)
           }
 
+          # Export configuration.
           "FRAMEWORK=$framework" | Out-File $env:GITHUB_ENV -Append
           "EXECUTION=$execution" | Out-File $env:GITHUB_ENV -Append
           "PROFILE=$profile" | Out-File $env:GITHUB_ENV -Append
@@ -294,12 +309,8 @@ jobs:
           Write-Host "Headless: $headless"
           Write-Host "Thread count: $threadCount"
           Write-Host "TestNG class: $className"
-          Write-Host "Feature file: $featureFile"
+          Write-Host "Feature file override: $featureFile"
 
-      # --------------------------------------------------
-      # 5. EXECUTE TESTS
-      # --------------------------------------------------
-      
       # --------------------------------------------------
       # 5. EXECUTE TESTS
       # --------------------------------------------------
@@ -322,12 +333,13 @@ jobs:
               Write-Host "================================="
 
               $browserArtifactDir = Join-Path "ci-artifacts" $browser
+
               New-Item -ItemType Directory -Force -Path $browserArtifactDir | Out-Null
 
               $stdoutLog = Join-Path $browserArtifactDir "maven-output.log"
               $executionLog = Join-Path $browserArtifactDir "execution.log"
 
-              # Select the correct suite XML.
+              # Select suite XML.
               $suiteSource = switch ($env:PROFILE) {
                   "testng-serial"   { "testng-serial.xml" }
                   "testng-parallel" { "testng-parallel.xml" }
@@ -342,16 +354,17 @@ jobs:
                   throw "Suite XML not found: $suiteSource"
               }
 
-              # Create temporary suite XML directory.
+              # Create browser-specific temporary suite.
               $suiteDestinationDir = Join-Path $browserArtifactDir "config"
+
               New-Item -ItemType Directory -Force -Path $suiteDestinationDir | Out-Null
 
               $suiteDestination = Join-Path $suiteDestinationDir $suiteSource
 
-              # Copy original suite XML to temporary destination.
+              # Copy original XML.
               Copy-Item -LiteralPath $suiteSource -Destination $suiteDestination -Force
 
-              # Load the copied XML.
+              # Load copied XML.
               [xml]$suiteXml = Get-Content -LiteralPath $suiteDestination -Raw
 
               $suiteElement = $suiteXml.DocumentElement
@@ -360,15 +373,18 @@ jobs:
                   throw "Unable to load suite XML: $suiteDestination"
               }
 
-              # Configure BDD parallel/serial execution.
-              if ($env:FRAMEWORK -eq "bdd") {
+              # Configure BDD execution.
+              if ($env:FRAMEWORK -eq "bdd" -and $env:EXECUTION -eq "parallel") {
 
                   $suiteElement.SetAttribute(
                       "data-provider-thread-count",
                       "$env:THREAD_COUNT"
                   )
 
-                  Write-Host "BDD data provider thread count: $env:THREAD_COUNT"
+                  Write-Host "BDD parallel data provider threads: $env:THREAD_COUNT"
+              }
+              elseif ($env:FRAMEWORK -eq "bdd") {
+                  Write-Host "BDD serial execution using suite XML."
               }
 
               # Configure TestNG parallel execution.
@@ -379,10 +395,10 @@ jobs:
                       "$env:THREAD_COUNT"
                   )
 
-                  Write-Host "TestNG thread count: $env:THREAD_COUNT"
+                  Write-Host "TestNG parallel threads: $env:THREAD_COUNT"
               }
 
-              # Save the modified temporary XML.
+              # Save temporary suite XML.
               $suiteXml.Save($suiteDestination)
 
               Write-Host "Suite XML: $suiteDestination"
@@ -404,16 +420,27 @@ jobs:
                   "-Ddataprovider.thread.count=$env:THREAD_COUNT"
               )
 
-              # TestNG class selection.
+              # Optional TestNG class selection.
               if ($env:FRAMEWORK -eq "testng" -and $env:CLASS_NAME) {
                   $mavenArgs += "-Dtest=$env:CLASS_NAME"
+                  Write-Host "Selected TestNG class: $env:CLASS_NAME"
               }
 
-              # BDD feature selection.
-              if ($env:FRAMEWORK -eq "bdd" -and $env:FEATURE_FILE) {
+              # Optional BDD feature override.
+              if (
+                  $env:FRAMEWORK -eq "bdd" -and
+                  -not [string]::IsNullOrWhiteSpace($env:FEATURE_FILE)
+              ) {
                   $mavenArgs += "-Dcucumber.features=$env:FEATURE_FILE"
+
+                  Write-Host "Using custom BDD feature: $env:FEATURE_FILE"
+              }
+              elseif ($env:FRAMEWORK -eq "bdd") {
+                  Write-Host "Using BDD runner from suite XML."
+                  Write-Host "No cucumber.features override will be passed."
               }
 
+              Write-Host ""
               Write-Host "Browser: $browser"
               Write-Host "Framework: $env:FRAMEWORK"
               Write-Host "Execution: $env:EXECUTION"
@@ -430,9 +457,10 @@ jobs:
               Add-Content $executionLog "Execution: $env:EXECUTION"
               Add-Content $executionLog "Threads: $env:THREAD_COUNT"
               Add-Content $executionLog "Suite XML: $suiteDestination"
+              Add-Content $executionLog "Feature override: $env:FEATURE_FILE"
               Add-Content $executionLog "Started: $(Get-Date)"
 
-              # Execute Maven and capture its actual exit code.
+              # Execute Maven.
               $previousErrorActionPreference = $ErrorActionPreference
 
               try {
@@ -444,6 +472,7 @@ jobs:
               }
               catch {
                   Add-Content $executionLog "PowerShell execution error: $_"
+
                   Write-Host "Maven invocation encountered an error:"
                   Write-Host $_
 
@@ -483,7 +512,7 @@ jobs:
                     -Recurse -Force
               }
 
-              # Check browser execution result.
+              # Check execution result.
               if ($mavenExitCode -ne 0) {
                   Write-Host "FAILED: $browser"
                   $failedBrowsers += $browser
@@ -493,13 +522,12 @@ jobs:
               }
           }
 
-          # Fail workflow if any browser execution failed.
+          # Fail workflow if any browser failed.
           if ($failedBrowsers.Count -gt 0) {
               throw "Test execution failed for: $($failedBrowsers -join ', '). Check ci-artifacts for complete logs."
           }
 
           Write-Host "All browser executions completed successfully."
-
 
       # --------------------------------------------------
       # 6. UPLOAD ARTIFACTS
@@ -531,7 +559,7 @@ jobs:
           | Headless | $env:HEADLESS |
           | Thread Count | $env:THREAD_COUNT |
           | TestNG Class | $env:CLASS_NAME |
-          | BDD Feature | $env:FEATURE_FILE |
+          | BDD Feature Override | $env:FEATURE_FILE |
 
           Download the workflow artifact to inspect Maven logs and reports.
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
