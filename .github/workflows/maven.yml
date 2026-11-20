@@ -44,6 +44,18 @@ on:
         required: false
         default: "src/test/resources/features/Login_Test.feature"
 
+      thread_count:
+        description: "Parallel execution thread count"
+        required: true
+        type: number
+        default: 4
+
+      dataprovider_thread_count:
+        description: "Parallel DataProvider thread count"
+        required: true
+        type: number
+        default: 3
+
   push:
     branches:
       - main
@@ -105,22 +117,17 @@ jobs:
           Write-Host "WINDOWS SELENIUM CI ENVIRONMENT"
           Write-Host "================================="
 
-          Write-Host "Java:"
           java -version
 
           if ($LASTEXITCODE -ne 0) {
             throw "Java installation is not working."
           }
 
-          Write-Host "Maven:"
           mvn -version
 
           if ($LASTEXITCODE -ne 0) {
             throw "Maven is not installed or not available in PATH."
           }
-
-          Write-Host "Project:"
-          Get-Location
 
           if (-not (Test-Path "pom.xml")) {
             throw "pom.xml was not found."
@@ -129,7 +136,7 @@ jobs:
           Write-Host "pom.xml verified."
 
       # ----------------------------------------
-      # 4. SELECT TEST CONFIGURATION
+      # 4. CONFIGURE TEST EXECUTION
       # ----------------------------------------
 
       - name: Configure Test Execution
@@ -142,12 +149,18 @@ jobs:
           $headless = "true"
           $target = "src/test/resources/features/Login_Test.feature"
 
+          $threadCount = 4
+          $dataProviderThreadCount = 3
+
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
 
             $framework = "${{ inputs.framework }}"
             $execution = "${{ inputs.execution_mode }}"
             $browser = "${{ inputs.browser }}"
             $target = "${{ inputs.test_target }}"
+
+            $threadCount = [int]"${{ inputs.thread_count }}"
+            $dataProviderThreadCount = [int]"${{ inputs.dataprovider_thread_count }}"
 
             if ("${{ inputs.headless }}" -eq "false") {
               $headless = "false"
@@ -166,9 +179,21 @@ jobs:
             throw "Invalid browser selected."
           }
 
-          # BDD uses a feature file by default.
-          # Clear the field to execute all features.
-          # For TestNG, enter a class name.
+          if ($threadCount -lt 1 -or $threadCount -gt 32) {
+            throw "Thread count must be between 1 and 32."
+          }
+
+          if ($dataProviderThreadCount -lt 1 -or $dataProviderThreadCount -gt 32) {
+            throw "DataProvider thread count must be between 1 and 32."
+          }
+
+          # Serial execution must remain serial.
+          if ($execution -eq "serial") {
+            $threadCount = 1
+            $dataProviderThreadCount = 1
+          }
+
+          # TestNG uses class names, not BDD feature paths.
           if ($framework -eq "testng" -and
               $target -eq "src/test/resources/features/Login_Test.feature") {
             $target = ""
@@ -182,13 +207,20 @@ jobs:
           "HEADLESS=$headless" >> $env:GITHUB_ENV
           "MAVEN_PROFILE=$profile" >> $env:GITHUB_ENV
           "TEST_TARGET=$target" >> $env:GITHUB_ENV
+          "THREAD_COUNT=$threadCount" >> $env:GITHUB_ENV
+          "DATAPROVIDER_THREAD_COUNT=$dataProviderThreadCount" >> $env:GITHUB_ENV
 
-          Write-Host "Framework       : $framework"
-          Write-Host "Execution       : $execution"
-          Write-Host "Browser         : $browser"
-          Write-Host "Headless        : $headless"
-          Write-Host "Maven Profile   : $profile"
-          Write-Host "Test Target     : $target"
+          Write-Host "================================="
+          Write-Host "TEST CONFIGURATION"
+          Write-Host "================================="
+          Write-Host "Framework: $framework"
+          Write-Host "Execution: $execution"
+          Write-Host "Browser: $browser"
+          Write-Host "Headless: $headless"
+          Write-Host "Maven Profile: $profile"
+          Write-Host "Test Target: $target"
+          Write-Host "Thread Count: $threadCount"
+          Write-Host "DataProvider Thread Count: $dataProviderThreadCount"
 
       # ----------------------------------------
       # 5. INSTALL / VERIFY BROWSERS
@@ -251,7 +283,7 @@ jobs:
               Write-Host "$browser is missing. Attempting installation."
 
               if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-                throw "winget is unavailable. Install $browser manually on the runner."
+                throw "winget is unavailable. Install $browser manually."
               }
 
               $package = switch ($browser) {
@@ -272,28 +304,47 @@ jobs:
             }
 
             if (-not $executable) {
-              throw "$browser executable could not be located after installation."
+              throw "$browser executable could not be located."
             }
 
             Write-Host "$browser verified: $executable"
           }
 
       # ----------------------------------------
-      # 6. RESOLVE POM DEPENDENCIES
+      # 6. RESOLVE MAVEN DEPENDENCIES
       # ----------------------------------------
 
       - name: Resolve Maven Dependencies
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path "ci-artifacts/setup" | Out-Null
+          New-Item -ItemType Directory -Force `
+            -Path "ci-artifacts/setup" | Out-Null
 
-          mvn -B -ntp dependency:resolve 2>&1 |
-            Tee-Object -FilePath "ci-artifacts/setup/dependency-resolution.log"
+          $mvnPath = (Get-Command mvn.cmd -ErrorAction Stop).Source
 
-          $result = $LASTEXITCODE
+          $stdout = "ci-artifacts/setup/dependency-stdout.log"
+          $stderr = "ci-artifacts/setup/dependency-stderr.log"
 
-          if ($result -ne 0) {
-            throw "Maven dependency resolution failed."
+          $process = Start-Process `
+            -FilePath $mvnPath `
+            -ArgumentList "-B -ntp dependency:resolve" `
+            -WorkingDirectory (Get-Location).Path `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -Wait `
+            -PassThru `
+            -NoNewWindow
+
+          if (Test-Path $stdout) {
+            Get-Content $stdout
+          }
+
+          if (Test-Path $stderr) {
+            Get-Content $stderr
+          }
+
+          if ($process.ExitCode -ne 0) {
+            throw "Maven dependency resolution failed. Exit code: $($process.ExitCode)"
           }
 
           Write-Host "Maven dependencies resolved successfully."
@@ -305,10 +356,14 @@ jobs:
       - name: Run Selenium Automation
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+
           $framework = $env:FRAMEWORK
           $profile = $env:MAVEN_PROFILE
           $target = $env:TEST_TARGET
           $headless = $env:HEADLESS
+          $threadCount = $env:THREAD_COUNT
+          $dataProviderThreadCount = $env:DATAPROVIDER_THREAD_COUNT
 
           if ($env:SELECTED_BROWSER -eq "all") {
             $browsers = @("chrome", "edge", "firefox")
@@ -319,7 +374,10 @@ jobs:
 
           $failedBrowsers = @()
 
-          New-Item -ItemType Directory -Force -Path "ci-artifacts" | Out-Null
+          New-Item -ItemType Directory -Force `
+            -Path "ci-artifacts" | Out-Null
+
+          $mvnPath = (Get-Command mvn.cmd -ErrorAction Stop).Source
 
           foreach ($browser in $browsers) {
 
@@ -337,7 +395,9 @@ jobs:
               "-DBROWSER=$browser",
               "-DHEADLESS=$headless",
               "-DINCOGNITO=false",
-              "-DREUSE_BROWSER=true"
+              "-DREUSE_BROWSER=true",
+              "-Dthread.count=$threadCount",
+              "-Ddataprovider.thread.count=$dataProviderThreadCount"
             )
 
             if (-not [string]::IsNullOrWhiteSpace($target)) {
@@ -354,7 +414,6 @@ jobs:
 
                 $mavenArgs += "-Dtest=$className"
               }
-
               elseif ($framework -eq "bdd") {
 
                 $feature = $target.Trim()
@@ -376,26 +435,62 @@ jobs:
               Write-Host "Executing complete suite."
             }
 
-            Write-Host "Maven profile: $profile"
+            Write-Host "Framework: $framework"
+            Write-Host "Maven Profile: $profile"
             Write-Host "Browser: $browser"
             Write-Host "Headless: $headless"
+            Write-Host "Thread Count: $threadCount"
+            Write-Host "DataProvider Thread Count: $dataProviderThreadCount"
 
-            Write-Host "Command:"
-            Write-Host "mvn $($mavenArgs -join ' ')"
+            Write-Host "Maven arguments:"
+            Write-Host ($mavenArgs -join " ")
 
-            $logFile = "ci-artifacts/$browser-maven.log"
-
-            & mvn @mavenArgs 2>&1 |
-              Tee-Object -FilePath $logFile
-
-            $testExitCode = $LASTEXITCODE
-
-            # Save reports separately for every browser.
             $browserArtifact = "ci-artifacts/$browser"
 
             New-Item -ItemType Directory -Force `
               -Path $browserArtifact | Out-Null
 
+            $stdoutLog = Join-Path $browserArtifact "maven-stdout.log"
+            $stderrLog = Join-Path $browserArtifact "maven-stderr.log"
+            $combinedLog = Join-Path $browserArtifact "maven-execution.log"
+
+            # Quote arguments for Windows process execution.
+            $quotedArgs = foreach ($argument in $mavenArgs) {
+              '"' + $argument.Replace('"', '\"') + '"'
+            }
+
+            $argumentLine = $quotedArgs -join " "
+
+            Write-Host "Starting Maven process..."
+
+            $process = Start-Process `
+              -FilePath $mvnPath `
+              -ArgumentList $argumentLine `
+              -WorkingDirectory (Get-Location).Path `
+              -RedirectStandardOutput $stdoutLog `
+              -RedirectStandardError $stderrLog `
+              -Wait `
+              -PassThru `
+              -NoNewWindow
+
+            $testExitCode = $process.ExitCode
+
+            # Display and combine Maven output.
+            if (Test-Path $stdoutLog) {
+              Get-Content $stdoutLog | Set-Content $combinedLog
+              Write-Host "========== MAVEN STANDARD OUTPUT =========="
+              Get-Content $stdoutLog
+            }
+
+            if (Test-Path $stderrLog) {
+              Get-Content $stderrLog | Add-Content $combinedLog
+              Write-Host "========== MAVEN STANDARD ERROR =========="
+              Get-Content $stderrLog
+            }
+
+            Write-Host "Maven exit code: $testExitCode"
+
+            # Preserve reports before the next clean execution.
             if (Test-Path "test-output") {
               Copy-Item "test-output" `
                 "$browserArtifact/test-output" -Recurse -Force
@@ -430,7 +525,7 @@ jobs:
 
           Write-Host ""
           Write-Host "========================================"
-          Write-Host "SELENIUM EXECUTION COMPLETED"
+          Write-Host "SELENIUM EXECUTION SUMMARY"
           Write-Host "========================================"
 
           if ($failedBrowsers.Count -gt 0) {
@@ -492,11 +587,13 @@ jobs:
           Write-Host "SELENIUM CI EXECUTION SUMMARY"
           Write-Host "======================================"
 
-          Write-Host "Framework      : $env:FRAMEWORK"
-          Write-Host "Execution Mode : $env:EXECUTION_MODE"
-          Write-Host "Browser        : $env:SELECTED_BROWSER"
-          Write-Host "Headless       : $env:HEADLESS"
-          Write-Host "Maven Profile  : $env:MAVEN_PROFILE"
-          Write-Host "Test Target    : $env:TEST_TARGET"
+          Write-Host "Framework: $env:FRAMEWORK"
+          Write-Host "Execution Mode: $env:EXECUTION_MODE"
+          Write-Host "Browser: $env:SELECTED_BROWSER"
+          Write-Host "Headless: $env:HEADLESS"
+          Write-Host "Maven Profile: $env:MAVEN_PROFILE"
+          Write-Host "Test Target: $env:TEST_TARGET"
+          Write-Host "Thread Count: $env:THREAD_COUNT"
+          Write-Host "DataProvider Threads: $env:DATAPROVIDER_THREAD_COUNT"
 
           Write-Host "======================================"
