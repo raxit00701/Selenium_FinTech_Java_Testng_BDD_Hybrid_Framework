@@ -346,22 +346,40 @@ jobs:
 
               $suiteDestination = Join-Path $suiteDestinationDir $suiteSource
 
-              [xml]$suiteXml = Get-Content $suiteSource -Raw
-
-              if ($env:EXECUTION -eq "parallel") {
-
-                  if ($env:FRAMEWORK -eq "testng") {
-                      $suiteXml.suite.SetAttribute("thread-count", $env:THREAD_COUNT)
-                  }
-
-                  if ($env:FRAMEWORK -eq "bdd") {
-                      $suiteXml.suite.SetAttribute("data-provider-thread-count", $env:THREAD_COUNT)
-                  }
+              # Load the TestNG suite XML
+              
+              [xml]$suiteXml = Get-Content -Path $suiteFile -Raw
+              
+              # Get the root XML element directly
+              $suiteElement = $suiteXml.DocumentElement
+              
+              if ($null -eq $suiteElement) {
+                  throw "Unable to load TestNG suite XML: $suiteFile"
               }
+              
+              # Configure parallel execution
+              if ($framework -eq "bdd" -and $execution -eq "parallel") {
+              
+                  $suiteElement.SetAttribute(
+                      "data-provider-thread-count",
+                      "$threadCount"
+                  )
+              
+                  Write-Host "BDD parallel execution enabled. Data provider threads: $threadCount"
+              }
+              elseif ($framework -eq "testng" -and $execution -eq "parallel") {
+              
+                  $suiteElement.SetAttribute(
+                      "thread-count",
+                      "$threadCount"
+                  )
+              
+                  Write-Host "TestNG parallel execution enabled. Threads: $threadCount"
+              }
+              
+              # Save the updated XML
+              $suiteXml.Save($suiteFile)
 
-              $suiteXml.Save((Join-Path (Get-Location).Path $suiteDestination))
-
-              Write-Host "Temporary suite XML: $suiteDestination"
 
               # Build Maven arguments.
               $mavenArgs = @(
