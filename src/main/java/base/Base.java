@@ -5,11 +5,14 @@ import org.openqa.selenium.WebDriver;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.AfterSuite;
 import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Listeners;
 
 import io.github.cdimascio.dotenv.Dotenv;
 import io.restassured.RestAssured;
+import utils.artifact.ReportingListener;
 import utils.log.LogUtil;
 
+@Listeners(ReportingListener.class)
 public class Base {
 
     protected WebDriver driver;
@@ -66,8 +69,8 @@ public class Base {
     }
 
     /**
-     * Fetches configuration prioritizing System Properties (e.g. -DBASE_URL=http://localhost:9090/)
-     * over the .env file.
+     * Fetches configuration prioritizing System Properties (e.g. -DBASE_URL=http://localhost:9090/),
+     * then OS environment variables, over the .env file.
      *
      * @param key The environment variable key
      * @return The value, or null if not found
@@ -77,6 +80,12 @@ public class Base {
 
         if (systemValue != null && !systemValue.isBlank()) {
             return systemValue;
+        }
+
+        String envValue = System.getenv(key);
+
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue;
         }
 
         return dotenv.get(key);
