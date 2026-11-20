@@ -1,357 +1,306 @@
-name: Kill Bill Selenium CI (TestNG & BDD)
+
+name: Selenium Java Automation
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
     inputs:
-      suite_type:
-        description: 'Execution Suite Flow (TestNG / BDD - Serial / Parallel)'
+      framework:
+        description: "Select testing framework"
         required: true
+        default: "bdd"
         type: choice
-        default: 'testng-serial'
         options:
-          - testng-serial
-          - testng-parallel
-          - bdd-serial
-          - bdd-parallel
-      test_class:
-        description: 'Optional: Specific TestNG/BDD Class Name (e.g., Login_validation, Create_Subs, TestRunner, ParallelTestRunner). Leave empty to run full suite XML.'
-        required: false
-        type: string
-        default: ''
-      browser:
-        description: 'Browser Selection (DriverFactory: chrome, edge, firefox, or all)'
+          - bdd
+          - testng
+
+      execution_mode:
+        description: "Select execution mode"
         required: true
+        default: "serial"
         type: choice
-        default: 'chrome'
+        options:
+          - serial
+          - parallel
+
+      browser:
+        description: "Select browser"
+        required: true
+        default: "chrome"
+        type: choice
         options:
           - chrome
           - edge
           - firefox
-          - all
+
       headless:
-        description: 'Headless Mode (true = CI Headless, false = Virtual Display Xvfb)'
+        description: "Run browser in headless mode"
         required: true
-        type: choice
-        default: 'true'
-        options:
-          - 'true'
-          - 'false'
-      incognito:
-        description: 'Incognito / Private Mode'
+        default: true
+        type: boolean
+
+      test_target:
+        description: "TestNG class name or BDD feature file path (leave empty for all)"
         required: false
-        type: choice
-        default: 'false'
-        options:
-          - 'false'
-          - 'true'
-      thread_count:
-        description: 'Parallel Thread Count (used when running parallel suites)'
-        required: false
-        type: string
-        default: '4'
+        default: ""
+
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selenium-automation-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  selenium-ci-execution:
-    name: ${{ github.event.inputs.suite_type || 'testng-serial' }} | ${{ matrix.browser }}
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        browser: ${{ fromJSON(github.event.inputs.browser == 'all' && '["chrome", "edge", "firefox"]' || format('["{0}"]', github.event.inputs.browser || 'chrome')) }}
+  automation:
+    name: Selenium Automation Tests
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 90
 
     env:
-      BASE_URL: ${{ secrets.BASE_URL || vars.BASE_URL || 'http://localhost:9090' }}
-      API_BASE_URL: ${{ secrets.API_BASE_URL || vars.API_BASE_URL || 'http://localhost:8080' }}
-      LOGIN_USERNAME: ${{ secrets.LOGIN_USERNAME || vars.LOGIN_USERNAME || 'admin' }}
-      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD || vars.LOGIN_PASSWORD || 'password' }}
-      DB_URL: ${{ secrets.DB_URL || vars.DB_URL || 'jdbc:mariadb://localhost:3307/killbill' }}
-      DB_USERNAME: ${{ secrets.DB_USERNAME || vars.DB_USERNAME || 'root' }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD || vars.DB_PASSWORD || 'killbill' }}
-
-      INPUT_SUITE_TYPE: ${{ github.event.inputs.suite_type || 'testng-serial' }}
-      INPUT_TEST_CLASS: ${{ github.event.inputs.test_class || '' }}
-      INPUT_BROWSER: ${{ matrix.browser }}
-      INPUT_HEADLESS: ${{ github.event.inputs.headless || 'true' }}
-      INPUT_INCOGNITO: ${{ github.event.inputs.incognito || 'false' }}
-      INPUT_THREAD_COUNT: ${{ github.event.inputs.thread_count || '4' }}
+      API_BASE_URL: ${{ vars.API_BASE_URL }}
+      BASE_URL: ${{ vars.BASE_URL }}
+      DB_URL: ${{ vars.DB_URL }}
+      DB_USERNAME: ${{ vars.DB_USERNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      LOGIN_USERNAME: ${{ vars.LOGIN_USERNAME }}
+      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
 
     steps:
-      # =========================================================
-      # 1. CHECKOUT REPOSITORY
-      # =========================================================
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # =========================================================
-      # 2. SETUP JAVA 17 & MAVEN CACHE
-      # =========================================================
-      - name: Set up JDK 17 with Maven Cache
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'maven'
+          distribution: temurin
+          java-version: "17"
+          cache: maven
 
-      # =========================================================
-      # 3. CACHE SELENIUM MANAGER & WEBDRIVER BINARIES
-      # =========================================================
-      - name: Cache Selenium Drivers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/selenium
-          key: ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-${{ hashFiles('pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-selenium-drivers-${{ matrix.browser }}-
-            ${{ runner.os }}-selenium-drivers-
-
-      # =========================================================
-      # 4. VERIFY BROWSERS ON UBUNTU RUNNER
-      # =========================================================
-      - name: Setup & Verify Browser (${{ matrix.browser }})
+      - name: Verify Java and Maven
+        shell: powershell
         run: |
-          echo "::group::Browser Verification ($INPUT_BROWSER)"
-          case "${INPUT_BROWSER,,}" in
-            chrome)
-              google-chrome --version
-              ;;
-            edge)
-              microsoft-edge --version
-              ;;
-            firefox)
-              if ! command -v firefox &> /dev/null; then
-                sudo apt-get update && sudo apt-get install -y firefox
-              fi
-              firefox --version
-              ;;
-          esac
-          echo "::endgroup::"
+          Write-Host "Java Version:"
+          java -version
 
-      # =========================================================
-      # 5. CONFIGURE RUNTIME .env FROM CI VARIABLES / SECRETS
-      # =========================================================
-      - name: Configure Runtime Environment (.env)
+          Write-Host "Maven Version:"
+          mvn -version
+
+          Write-Host "Working Directory:"
+          Get-Location
+
+      - name: Verify Installed Browsers
+        shell: powershell
         run: |
-          echo "::group::Generating src/main/java/env/.env"
-          mkdir -p src/main/java/env
-          cat <<EOF > src/main/java/env/.env
-          BASE_URL=${BASE_URL%/}
-          API_BASE_URL=${API_BASE_URL%/}
-          LOGIN_USERNAME=${LOGIN_USERNAME}
-          LOGIN_PASSWORD=${LOGIN_PASSWORD}
-          DB_URL=${DB_URL}
-          DB_USERNAME=${DB_USERNAME}
-          DB_PASSWORD=${DB_PASSWORD}
-          EOF
-          echo "Runtime .env created (BASE_URL: ${BASE_URL%/} | API_BASE_URL: ${API_BASE_URL%/} | DB_URL: ${DB_URL})"
-          echo "::endgroup::"
-
-      # =========================================================
-      # 6. START MARIADB, SEED BASELINE DATA, AND BOOT KILL BILL + KAUI
-      # =========================================================
-      - name: Start & Seed MariaDB (Fast Bulk Import)
-        run: |
-          echo "::group::Starting MariaDB & Seeding ci-seed.sql"
-          if [ ! -s "ci-seed.sql" ]; then
-            echo "ERROR: ci-seed.sql is missing or empty in repository root."
-            exit 1
-          fi
-
-          DB_USER_CLEAN="$(printf '%s' "$DB_USERNAME" | tr -d '\r\n' | xargs)"
-          DB_PASS_CLEAN="$(printf '%s' "$DB_PASSWORD" | tr -d '\r\n')"
-          export DB_USERNAME="$DB_USER_CLEAN"
-          export DB_PASSWORD="$DB_PASS_CLEAN"
-
-          docker compose -f docker-compose.yml up -d db
-          for i in $(seq 1 30); do
-            if docker compose -f docker-compose.yml exec -T -e DB_USER="$DB_USER_CLEAN" -e DB_PASS="$DB_PASS_CLEAN" db sh -c 'CLIENT=$(command -v mariadb || command -v mysql); "$CLIENT" -h 127.0.0.1 -P 3306 -u"$DB_USER" -p"$DB_PASS" -e "SELECT 1;" >/dev/null 2>&1'; then
-              echo "MariaDB is authenticated and ready on localhost:3307!"
-              break
-            fi
-            if [ "$i" -eq 30 ]; then
-              echo "Timed out waiting for authenticated MariaDB connection."
-              docker compose -f docker-compose.yml logs --tail=50 db
-              exit 1
-            fi
-            sleep 2
-          done
-
-          sed -i '1s/^\xEF\xBB\xBF//' ci-seed.sql
-          {
-            echo "SET autocommit=0; SET unique_checks=0; SET foreign_key_checks=0;"
-            cat ci-seed.sql
-            echo "COMMIT; SET unique_checks=1; SET foreign_key_checks=1;"
-          } | docker compose -f docker-compose.yml exec -T -e DB_USER="$DB_USER_CLEAN" -e DB_PASS="$DB_PASS_CLEAN" db sh -c 'CLIENT=$(command -v mariadb || command -v mysql); "$CLIENT" -h 127.0.0.1 -P 3306 -u"$DB_USER" -p"$DB_PASS"'
-          echo "Database seeded in bulk mode."
-          echo "::endgroup::"
-    
-      # =========================================================
-      # 7. COMPILE TEST CLASSES
-      # =========================================================
-      - name: Compile Project & Tests
-        run: |
-          echo "::group::Maven Test Compilation"
-          mvn test-compile -B -Dstyle.color=always
-          echo "::endgroup::"
-
-      # =========================================================
-      # 8. EXECUTE SELENIUM SUITE (TESTNG OR BDD / SERIAL OR PARALLEL)
-      # =========================================================
-      - name: Run Selenium Automation Suite
-        id: run_tests
-        run: |
-          suite_type="${INPUT_SUITE_TYPE,,}"
-          raw_class="$(echo "$INPUT_TEST_CLASS" | xargs)"
-          browser="${INPUT_BROWSER,,}"
-          headless="${INPUT_HEADLESS,,}"
-          incognito="${INPUT_INCOGNITO,,}"
-
-          case "$suite_type" in
-            testng-serial)
-              suite_xml="testng-serial.xml"
-              exec_mode="none"
-              threads="1"
-              ;;
-            testng-parallel)
-              suite_xml="testng-parallel.xml"
-              exec_mode="classes"
-              threads="$INPUT_THREAD_COUNT"
-              ;;
-            bdd-serial)
-              suite_xml="bdd-serial.xml"
-              exec_mode="none"
-              threads="1"
-              ;;
-            bdd-parallel)
-              suite_xml="bdd-parallel.xml"
-              exec_mode="none"
-              threads="1"
-              ;;
-            *)
-              echo "Unsupported suite_type: $suite_type"
-              exit 1
-              ;;
-          esac
-
-          mvn_args=(
-            "test"
-            "-B"
-            "-e"
-            "-Dstyle.color=always"
-            "-P${suite_type}"
-            "-Dexecution.mode=${exec_mode}"
-            "-Dthread.count=${threads}"
-            "-DBROWSER=${browser}"
-            "-DHEADLESS=${headless}"
-            "-DINCOGNITO=${incognito}"
+          $browsers = @(
+            "chrome",
+            "msedge",
+            "firefox"
           )
 
-          if [ -n "$raw_class" ]; then
-            normalized_class="${raw_class//\\//}"
-            normalized_class="${normalized_class#src/test/java/}"
-            normalized_class="${normalized_class%.java}"
-            normalized_class="${normalized_class//\//.}"
-            mvn_args+=("-Dtest=${normalized_class}")
-            target_display="Single Class: ${normalized_class} (Flow: ${suite_type})"
-          else
-            mvn_args+=("-Dsuite=${suite_xml}")
-            target_display="Suite XML: ${suite_xml} (Profile: ${suite_type})"
-          fi
+          foreach ($browser in $browsers) {
+            $command = Get-Command $browser -ErrorAction SilentlyContinue
 
-          echo "============================================================"
-          echo " Execution Target : $target_display"
-          echo " Browser          : $browser (Headless: $headless | Incognito: $incognito)"
-          echo " Threading        : mode=$exec_mode | threads=$threads (DataProvider: pom.xml default)"
-          echo " Command          : mvn ${mvn_args[*]}"
-          echo "============================================================"
+            if ($command) {
+              Write-Host "$browser is available."
+            }
+            else {
+              Write-Host "$browser command was not found in PATH."
+            }
+          }
 
-          {
-            echo "### Kill Bill Selenium CI Run ($browser)"
-            echo "| Parameter | Value |"
-            echo "| :--- | :--- |"
-            echo "| **Target** | \`$target_display\` |"
-            echo "| **Browser** | \`$browser\` (Headless: \`$headless\`, Incognito: \`$incognito\`) |"
-            echo "| **Parallel Mode** | \`$exec_mode\` (Threads: \`$threads\`, DataProvider: \`pom.xml default\`) |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          set +e
-          if [ "$headless" = "false" ]; then
-            xvfb-run -a mvn "${mvn_args[@]}"
-          else
-            mvn "${mvn_args[@]}"
-          fi
-          exit_code=$?
-          set -e
-
-          if [ $exit_code -ne 0 ]; then
-            for dump in target/surefire-reports/*.dumpstream; do
-              [ -f "$dump" ] || continue
-              echo "::group::Surefire Dump ($dump)"
-              cat "$dump"
-              echo "::endgroup::"
-            done
-            exit $exit_code
-          fi
-
-      # =========================================================
-      # 9. DUMP DOCKER LOGS ON FAILURE
-      # =========================================================
-      - name: Print Container Logs on Failure
-        if: failure()
+      - name: Resolve Maven Dependencies
+        shell: powershell
         run: |
-          echo "::group::Docker Compose Container Logs"
-          docker compose -f docker-compose.yml logs --tail=150
-          echo "::endgroup::"
+          mvn -B -ntp dependency:resolve
 
-      # =========================================================
-      # 10. UPLOAD TESTNG ARTIFACT (ExecutionDashboard.html & Evidence)
-      # =========================================================
-      - name: Upload TestNG Dashboard & Execution Evidence
+          if ($LASTEXITCODE -ne 0) {
+            throw "Maven dependency resolution failed."
+          }
+
+      - name: Select Test Configuration
+        id: config
+        shell: powershell
+        run: |
+          $framework = "bdd"
+          $execution = "serial"
+          $browser = "chrome"
+          $headless = "true"
+          $target = ""
+
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $framework = "${{ inputs.framework }}"
+            $execution = "${{ inputs.execution_mode }}"
+            $browser = "${{ inputs.browser }}"
+            $target = "${{ inputs.test_target }}"
+            
+            if ("${{ inputs.headless }}" -eq "false") {
+              $headless = "false"
+            }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($framework)) {
+            $framework = "bdd"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($execution)) {
+            $execution = "serial"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($browser)) {
+            $browser = "chrome"
+          }
+
+          if ($framework -notin @("bdd", "testng")) {
+            throw "Invalid framework: $framework"
+          }
+
+          if ($execution -notin @("serial", "parallel")) {
+            throw "Invalid execution mode: $execution"
+          }
+
+          if ($browser -notin @("chrome", "edge", "firefox")) {
+            throw "Invalid browser: $browser"
+          }
+
+          if ($framework -eq "bdd") {
+            $profile = "bdd-$execution"
+          }
+          else {
+            $profile = "testng-$execution"
+          }
+
+          "FRAMEWORK=$framework" >> $env:GITHUB_ENV
+          "EXECUTION_MODE=$execution" >> $env:GITHUB_ENV
+          "BROWSER=$browser" >> $env:GITHUB_ENV
+          "HEADLESS=$headless" >> $env:GITHUB_ENV
+          "PROFILE=$profile" >> $env:GITHUB_ENV
+          "TEST_TARGET=$target" >> $env:GITHUB_ENV
+
+          Write-Host "Framework: $framework"
+          Write-Host "Execution: $execution"
+          Write-Host "Browser: $browser"
+          Write-Host "Headless: $headless"
+          Write-Host "Maven Profile: $profile"
+          Write-Host "Test Target: $target"
+
+      - name: Execute Automation Tests
+        shell: powershell
+        run: |
+          $mavenArgs = @(
+            "-B",
+            "-ntp",
+            "clean",
+            "test",
+            "-P$env:PROFILE",
+            "-DBROWSER=$env:BROWSER",
+            "-DHEADLESS=$env:HEADLESS",
+            "-DINCOGNITO=false",
+            "-DREUSE_BROWSER=true"
+          )
+
+          if (-not [string]::IsNullOrWhiteSpace($env:TEST_TARGET)) {
+
+            if ($env:FRAMEWORK -eq "testng") {
+              Write-Host "Executing individual TestNG class: $env:TEST_TARGET"
+
+              $className = $env:TEST_TARGET.Trim()
+
+              if ($className -notmatch '^[A-Za-z0-9_.$*]+$') {
+                throw "Invalid TestNG class name."
+              }
+
+              $mavenArgs += "-Dtest=$className"
+            }
+            elseif ($env:FRAMEWORK -eq "bdd") {
+              Write-Host "Executing individual BDD feature: $env:TEST_TARGET"
+
+              $feature = $env:TEST_TARGET.Trim()
+
+              if (-not (Test-Path -LiteralPath $feature -PathType Leaf)) {
+                throw "BDD feature file not found: $feature"
+              }
+
+              if ($feature -notmatch '\.feature$') {
+                throw "BDD target must be a .feature file."
+              }
+
+              $mavenArgs += "-Dcucumber.features=$feature"
+            }
+          }
+
+          Write-Host "Running Maven:"
+          Write-Host "mvn $($mavenArgs -join ' ')"
+
+          & mvn @mavenArgs 2>&1 | Tee-Object -FilePath "maven-execution.log"
+
+          $testExitCode = $LASTEXITCODE
+
+          if ($testExitCode -ne 0) {
+            Write-Error "Automation tests failed. Maven exit code: $testExitCode"
+            exit $testExitCode
+          }
+
+          Write-Host "Automation execution completed successfully."
+
+      - name: Upload TestNG Execution Dashboard
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: testng-dashboard-${{ github.event.inputs.suite_type || 'testng-serial' }}-${{ matrix.browser }}
+          name: testng-execution-dashboard
+          path: test-output/dashboard/ExecutionDashboard.html
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload TestNG Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testng-reports
           path: |
-            test-output/dashboard/ExecutionDashboard.html
             test-output/
           if-no-files-found: warn
           retention-days: 14
 
-      # =========================================================
-      # 11. UPLOAD BDD ARTIFACT (cucumber.html & cucumber.json)
-      # =========================================================
-      - name: Upload Cucumber BDD Report
+      - name: Upload Cucumber BDD Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bdd-cucumber-report-${{ github.event.inputs.suite_type || 'testng-serial' }}-${{ matrix.browser }}
+          name: cucumber-reports
           path: |
-            target/cucumber-reports/cucumber.html
-            target/cucumber-reports/cucumber.json
+            target/cucumber-reports/
           if-no-files-found: warn
           retention-days: 14
 
-      # =========================================================
-      # 12. UPLOAD SUREFIRE LOGS & REPORTS
-      # =========================================================
-      - name: Upload Maven Surefire Logs
+      - name: Upload Maven Logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: surefire-logs-${{ github.event.inputs.suite_type || 'testng-serial' }}-${{ matrix.browser }}
-          path: target/surefire-reports/
+          name: maven-execution-logs
+          path: |
+            maven-execution.log
+            target/surefire-reports/
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
 
-      # =========================================================
-      # 13. TEARDOWN DOCKER & CLEANUP SENSITIVE .env FILE
-      # =========================================================
-      - name: Cleanup Docker & Runtime .env
+      - name: Execution Summary
         if: always()
+        shell: powershell
         run: |
-          docker compose -f docker-compose.yml down -v || true
-          rm -f src/main/java/env/.env
+          Write-Host "======================================"
+          Write-Host "SELENIUM AUTOMATION EXECUTION SUMMARY"
+          Write-Host "======================================"
+          Write-Host "Framework: $env:FRAMEWORK"
+          Write-Host "Execution Mode: $env:EXECUTION_MODE"
+          Write-Host "Browser: $env:BROWSER"
+          Write-Host "Headless: $env:HEADLESS"
+          Write-Host "Maven Profile: $env:PROFILE"
+          Write-Host "Test Target: $env:TEST_TARGET"
+          Write-Host "======================================"
