@@ -299,6 +299,10 @@ jobs:
       # --------------------------------------------------
       # 5. EXECUTE TESTS
       # --------------------------------------------------
+      
+      # --------------------------------------------------
+      # 5. EXECUTE TESTS
+      # --------------------------------------------------
       - name: Execute Selenium tests
         run: |
           $ErrorActionPreference = "Stop"
@@ -318,7 +322,6 @@ jobs:
               Write-Host "================================="
 
               $browserArtifactDir = Join-Path "ci-artifacts" $browser
-
               New-Item -ItemType Directory -Force -Path $browserArtifactDir | Out-Null
 
               $stdoutLog = Join-Path $browserArtifactDir "maven-output.log"
@@ -339,47 +342,50 @@ jobs:
                   throw "Suite XML not found: $suiteSource"
               }
 
-              # Create temporary suite XML.
+              # Create temporary suite XML directory.
               $suiteDestinationDir = Join-Path $browserArtifactDir "config"
-
               New-Item -ItemType Directory -Force -Path $suiteDestinationDir | Out-Null
 
               $suiteDestination = Join-Path $suiteDestinationDir $suiteSource
 
-              # Load the TestNG suite XML
-              
-              [xml]$suiteXml = Get-Content -Path $suiteFile -Raw
-              
-              # Get the root XML element directly
+              # Copy original suite XML to temporary destination.
+              Copy-Item -LiteralPath $suiteSource -Destination $suiteDestination -Force
+
+              # Load the copied XML.
+              [xml]$suiteXml = Get-Content -LiteralPath $suiteDestination -Raw
+
               $suiteElement = $suiteXml.DocumentElement
-              
+
               if ($null -eq $suiteElement) {
-                  throw "Unable to load TestNG suite XML: $suiteFile"
+                  throw "Unable to load suite XML: $suiteDestination"
               }
-              
-              # Configure parallel execution
-              if ($framework -eq "bdd" -and $execution -eq "parallel") {
-              
+
+              # Configure BDD parallel/serial execution.
+              if ($env:FRAMEWORK -eq "bdd") {
+
                   $suiteElement.SetAttribute(
                       "data-provider-thread-count",
-                      "$threadCount"
+                      "$env:THREAD_COUNT"
                   )
-              
-                  Write-Host "BDD parallel execution enabled. Data provider threads: $threadCount"
+
+                  Write-Host "BDD data provider thread count: $env:THREAD_COUNT"
               }
-              elseif ($framework -eq "testng" -and $execution -eq "parallel") {
-              
+
+              # Configure TestNG parallel execution.
+              elseif ($env:FRAMEWORK -eq "testng" -and $env:EXECUTION -eq "parallel") {
+
                   $suiteElement.SetAttribute(
                       "thread-count",
-                      "$threadCount"
+                      "$env:THREAD_COUNT"
                   )
-              
-                  Write-Host "TestNG parallel execution enabled. Threads: $threadCount"
-              }
-              
-              # Save the updated XML
-              $suiteXml.Save($suiteFile)
 
+                  Write-Host "TestNG thread count: $env:THREAD_COUNT"
+              }
+
+              # Save the modified temporary XML.
+              $suiteXml.Save($suiteDestination)
+
+              Write-Host "Suite XML: $suiteDestination"
 
               # Build Maven arguments.
               $mavenArgs = @(
@@ -398,10 +404,12 @@ jobs:
                   "-Ddataprovider.thread.count=$env:THREAD_COUNT"
               )
 
+              # TestNG class selection.
               if ($env:FRAMEWORK -eq "testng" -and $env:CLASS_NAME) {
                   $mavenArgs += "-Dtest=$env:CLASS_NAME"
               }
 
+              # BDD feature selection.
               if ($env:FRAMEWORK -eq "bdd" -and $env:FEATURE_FILE) {
                   $mavenArgs += "-Dcucumber.features=$env:FEATURE_FILE"
               }
@@ -424,15 +432,7 @@ jobs:
               Add-Content $executionLog "Suite XML: $suiteDestination"
               Add-Content $executionLog "Started: $(Get-Date)"
 
-              # ------------------------------------------
-              # Execute Maven.
-              #
-              # Windows PowerShell 5.1 can interpret native
-              # stderr output as a PowerShell error.
-              # Temporarily use Continue so Maven warnings
-              # do not terminate this workflow step.
-              # ------------------------------------------
-
+              # Execute Maven and capture its actual exit code.
               $previousErrorActionPreference = $ErrorActionPreference
 
               try {
@@ -444,7 +444,6 @@ jobs:
               }
               catch {
                   Add-Content $executionLog "PowerShell execution error: $_"
-
                   Write-Host "Maven invocation encountered an error:"
                   Write-Host $_
 
@@ -484,7 +483,7 @@ jobs:
                     -Recurse -Force
               }
 
-              # Browser execution result.
+              # Check browser execution result.
               if ($mavenExitCode -ne 0) {
                   Write-Host "FAILED: $browser"
                   $failedBrowsers += $browser
@@ -494,12 +493,13 @@ jobs:
               }
           }
 
-          # Fail the workflow if any browser failed.
+          # Fail workflow if any browser execution failed.
           if ($failedBrowsers.Count -gt 0) {
-              throw "Test execution failed for: $($failedBrowsers -join ', '). Check ci-artifacts for complete stack traces."
+              throw "Test execution failed for: $($failedBrowsers -join ', '). Check ci-artifacts for complete logs."
           }
 
           Write-Host "All browser executions completed successfully."
+
 
       # --------------------------------------------------
       # 6. UPLOAD ARTIFACTS
