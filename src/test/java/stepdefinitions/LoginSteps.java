@@ -11,8 +11,8 @@ import org.testng.Assert;
 
 import base.DriverFactory;
 import io.cucumber.java.en.Given;
-import io.cucumber.java.en.When;
 import io.cucumber.java.en.Then;
+import io.cucumber.java.en.When;
 import io.github.cdimascio.dotenv.Dotenv;
 
 public class LoginSteps {
@@ -23,6 +23,7 @@ public class LoginSteps {
 
     private static final Dotenv dotenv = Dotenv.configure()
             .directory("src/main/java/env")
+            .filename(".env")
             .ignoreIfMissing()
             .load();
 
@@ -48,19 +49,7 @@ public class LoginSteps {
 
         Assert.assertNotNull(driver, "WebDriver should not be null.");
 
-        // Read from src/main/java/env/.env first, then system environment.
-        loginUrl = dotenv.get("BASE_URL");
-        if (loginUrl == null || loginUrl.isBlank()) {
-            loginUrl = System.getenv("BASE_URL");
-        }
-
-        if (loginUrl == null || loginUrl.isBlank()) {
-            throw new IllegalStateException(
-                    "BASE_URL is missing in src/main/java/env/.env and system environment."
-            );
-        }
-
-        loginUrl = loginUrl.trim().replaceAll("/+$", "");
+        loginUrl = resolveBaseUrl();
 
         System.out.println("Navigating to login page: " + loginUrl);
 
@@ -138,5 +127,26 @@ public class LoginSteps {
                 validResponse,
                 "Unexpected login response: " + actualMessage
         );
+    }
+
+    private static String resolveBaseUrl() {
+
+        String url = System.getProperty("BASE_URL");
+
+        if (url == null || url.isBlank()) {
+            url = System.getenv("BASE_URL");
+        }
+
+        if (url == null || url.isBlank()) {
+            url = dotenv.get("BASE_URL");
+        }
+
+        if (url == null || url.isBlank()) {
+            throw new IllegalStateException(
+                    "BASE_URL is missing in system properties, environment variables, and src/main/java/env/.env"
+            );
+        }
+
+        return url.trim().replaceAll("/+$", "");
     }
 }
