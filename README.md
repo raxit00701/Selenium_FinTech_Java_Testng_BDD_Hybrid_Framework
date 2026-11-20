@@ -297,12 +297,8 @@ Selenium_java_Kill_bill
 ├── testng-parallel.xml             # TestNG parallel suite
 ├── bdd-serial.xml                  # Cucumber serial suite
 ├── bdd-parallel.xml                # Cucumber parallel suite
-├── docker-compose.yml              # Docker Compose stack for the system under test
-├── ci-seed.sql                     # Database seed script for the Dockerised environment (CI / local)
 ├── .github/
-│   ├── workflows/maven.yml         # "Windows Selenium CI" workflow
-│   └── modernize/java-upgrade/     # Java-upgrade assistant hooks (PowerShell + shell)
-├── .vscode/settings.json
+│   └── workflows/maven.yml         # "Windows Selenium CI" workflow
 ├── src/main
 │   ├── java
 │   │   ├── API/                    # REST Assured clients
@@ -312,7 +308,6 @@ Selenium_java_Kill_bill
 │   │   │   ├── Base.java
 │   │   │   └── DriverFactory.java  # Thread-safe browser lifecycle
 │   │   ├── DB/DatabaseConnection.java
-│   │   ├── env/.env                # Local configuration (never commit secrets)
 │   │   └── utils/
 │   │       ├── artifact/ReportingListener.java     # ITestListener, the evidence engine
 │   │       ├── data_driven/JsonReader.java
