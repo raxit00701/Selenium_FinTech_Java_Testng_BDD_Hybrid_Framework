@@ -1,3 +1,4 @@
+
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -11,8 +12,9 @@
     <version>1.0-SNAPSHOT</version>
     <name>Selenium TestNG Automation Framework</name>
 
-    <!-- ================= PROPERTIES (DYNAMIC DEFAULTS) ================= -->
+    <!-- ================= PROPERTIES ================= -->
     <properties>
+
         <!-- Java -->
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -36,17 +38,19 @@
         <!-- Cucumber -->
         <cucumber.version>8.0.4</cucumber.version>
 
-        <!-- Dynamic Suite & Thread Configuration (Overridable via -D or -P) -->
+        <!-- Dynamic TestNG Suite -->
         <suite>testng-serial.xml</suite>
-        <execution.mode>none</execution.mode>
+
+        <!-- Thread Defaults: NEVER LEAVE THESE EMPTY -->
         <thread.count>1</thread.count>
         <dataprovider.thread.count>1</dataprovider.thread.count>
 
-        <!-- Browser & Session Defaults (Matches -DBROWSER, -DHEADLESS, -DINCOGNITO CLI flags) -->
+        <!-- Browser Defaults -->
         <BROWSER>chrome</BROWSER>
         <HEADLESS>false</HEADLESS>
         <INCOGNITO>false</INCOGNITO>
         <REUSE_BROWSER>true</REUSE_BROWSER>
+
     </properties>
 
     <!-- ================= DEPENDENCIES ================= -->
@@ -71,9 +75,10 @@
             <groupId>org.testng</groupId>
             <artifactId>testng</artifactId>
             <version>${testng.version}</version>
+            <scope>test</scope>
         </dependency>
 
-        <!-- MARIA DB -->
+        <!-- MARIADB -->
         <dependency>
             <groupId>org.mariadb.jdbc</groupId>
             <artifactId>mariadb-java-client</artifactId>
@@ -86,11 +91,13 @@
             <artifactId>rest-assured</artifactId>
             <version>${restassured.version}</version>
         </dependency>
+
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>json-path</artifactId>
             <version>${restassured.version}</version>
         </dependency>
+
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>xml-path</artifactId>
@@ -104,14 +111,13 @@
             <version>${dotenv.version}</version>
         </dependency>
 
-        <!-- JACKSON DATABIND (For JSON Data-Driven Tests) -->
+        <!-- JACKSON -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
         </dependency>
 
-        <!-- JACKSON JDK8 MODULE (Required by Cucumber Reports) -->
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jdk8</artifactId>
@@ -119,22 +125,25 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- LOGGING: SLF4J & LOG4J2 -->
+        <!-- LOGGING -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>2.0.17</version>
         </dependency>
+
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-api</artifactId>
             <version>${log4j.version}</version>
         </dependency>
+
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
             <version>${log4j.version}</version>
         </dependency>
+
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-slf4j2-impl</artifactId>
@@ -148,19 +157,20 @@
             <version>${extent.version}</version>
         </dependency>
 
-        <!-- SCREENSHOT: SHUTTERBUG -->
+        <!-- SCREENSHOTS -->
         <dependency>
             <groupId>com.assertthat</groupId>
             <artifactId>selenium-shutterbug</artifactId>
             <version>${shutterbug.version}</version>
         </dependency>
 
-        <!-- VIDEO: JAVACV & FFMPEG -->
+        <!-- VIDEO RECORDING -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>javacv</artifactId>
             <version>${javacv.version}</version>
         </dependency>
+
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>ffmpeg-platform</artifactId>
@@ -174,6 +184,7 @@
             <version>${cucumber.version}</version>
             <scope>test</scope>
         </dependency>
+
         <dependency>
             <groupId>io.cucumber</groupId>
             <artifactId>cucumber-testng</artifactId>
@@ -186,6 +197,7 @@
     <!-- ================= BUILD ================= -->
     <build>
         <plugins>
+
             <!-- MAVEN COMPILER -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -196,114 +208,129 @@
                 </configuration>
             </plugin>
 
-            <!-- MAVEN SUREFIRE / TESTNG (SERIAL & PARALLEL DYNAMIC ENGINE) -->
+            <!-- MAVEN SUREFIRE -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.3</version>
+
                 <configuration>
+
+                    <!-- TestNG Suite Selection -->
                     <suiteXmlFiles>
                         <suiteXmlFile>${suite}</suiteXmlFile>
                     </suiteXmlFiles>
 
-                    <!-- Dynamic execution mode: none (serial), classes, methods, both -->
-                    <parallel>${execution.mode}</parallel>
-                    <threadCount>${thread.count}</threadCount>
+                    <!-- Fork Configuration -->
+                    <forkCount>1</forkCount>
+                    <reuseForks>true</reuseForks>
+                    <failIfNoTests>true</failIfNoTests>
 
-                    <!-- Forward CLI / Profile properties directly to forked JVM -->
+                    <!-- Pass properties to forked JVM -->
                     <systemPropertyVariables>
+
+                        <!-- Browser -->
                         <BROWSER>${BROWSER}</BROWSER>
                         <HEADLESS>${HEADLESS}</HEADLESS>
                         <INCOGNITO>${INCOGNITO}</INCOGNITO>
                         <REUSE_BROWSER>${REUSE_BROWSER}</REUSE_BROWSER>
+
+                        <!-- Framework Thread Properties -->
                         <thread.count>${thread.count}</thread.count>
                         <dataprovider.thread.count>${dataprovider.thread.count}</dataprovider.thread.count>
+
                     </systemPropertyVariables>
 
-                    <!-- TestNG DataProvider Parallelism & Listener Configuration -->
+                    <!-- TestNG Provider Configuration -->
                     <properties>
                         <property>
                             <name>dataproviderthreadcount</name>
                             <value>${dataprovider.thread.count}</value>
                         </property>
-                        <property>
-                            <name>listener</name>
-                            <value>utils.artifact.ReportingListener</value>
-                        </property>
                     </properties>
+
                 </configuration>
             </plugin>
+
         </plugins>
     </build>
 
     <!-- ================= EXECUTION PROFILES ================= -->
     <profiles>
-        <!-- 1. TestNG Serial (Default) -->
+
+        <!-- 1. TESTNG SERIAL -->
         <profile>
             <id>testng-serial</id>
+
             <activation>
                 <activeByDefault>true</activeByDefault>
             </activation>
+
             <properties>
                 <suite>testng-serial.xml</suite>
-                <execution.mode>none</execution.mode>
                 <thread.count>1</thread.count>
                 <dataprovider.thread.count>1</dataprovider.thread.count>
             </properties>
         </profile>
 
-        <!-- 2. TestNG Parallel (Classes/Methods + DataProviders) -->
+        <!-- 2. TESTNG PARALLEL -->
         <profile>
             <id>testng-parallel</id>
+
             <properties>
                 <suite>testng-parallel.xml</suite>
-                <execution.mode>classes</execution.mode>
                 <thread.count>4</thread.count>
                 <dataprovider.thread.count>3</dataprovider.thread.count>
             </properties>
         </profile>
 
-        <!-- 3. Cucumber BDD Serial -->
+        <!-- 3. BDD SERIAL -->
         <profile>
             <id>bdd-serial</id>
+
             <properties>
                 <suite>bdd-serial.xml</suite>
-                <execution.mode>none</execution.mode>
                 <thread.count>1</thread.count>
                 <dataprovider.thread.count>1</dataprovider.thread.count>
             </properties>
         </profile>
 
-        <!-- 4. Cucumber BDD Parallel (Parallel Scenario DataProvider) -->
+        <!-- 4. BDD PARALLEL -->
         <profile>
             <id>bdd-parallel</id>
+
             <properties>
                 <suite>bdd-parallel.xml</suite>
-                <execution.mode>none</execution.mode>
                 <thread.count>1</thread.count>
                 <dataprovider.thread.count>4</dataprovider.thread.count>
             </properties>
         </profile>
 
-        <!-- 5. Auto-activates when -Dtest=ClassName is passed so suiteXmlFiles does not block it -->
+        <!-- 5. INDIVIDUAL TESTNG CLASS -->
         <profile>
             <id>single-test</id>
+
             <activation>
                 <property>
                     <name>test</name>
                 </property>
             </activation>
+
             <build>
                 <plugins>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
+
                         <configuration>
-                            <suiteXmlFiles combine.self="override" />
+                            <suiteXmlFiles combine.self="override"/>
                         </configuration>
+
                     </plugin>
                 </plugins>
             </build>
         </profile>
+
     </profiles>
+
 </project>
