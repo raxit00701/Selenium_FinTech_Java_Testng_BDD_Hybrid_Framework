@@ -40,7 +40,7 @@ on:
         default: true
 
       test_target:
-        description: "BDD feature path or TestNG class name. Clear to run the complete suite."
+        description: "BDD feature path or TestNG class name. Clear to run complete suite."
         required: false
         default: "src/test/resources/features/Login_Test.feature"
 
@@ -88,28 +88,28 @@ jobs:
 
     steps:
 
-      # ----------------------------------------
+      # ========================================
       # 1. CHECKOUT
-      # ----------------------------------------
+      # ========================================
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ----------------------------------------
+      # ========================================
       # 2. JAVA SETUP
-      # ----------------------------------------
+      # No GitHub Maven cache upload.
+      # Reuses local Windows .m2 repository.
+      # ========================================
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
-          cache-dependency-path: pom.xml
 
-      # ----------------------------------------
+      # ========================================
       # 3. VERIFY ENVIRONMENT
-      # ----------------------------------------
+      # ========================================
 
       - name: Verify Windows Java and Maven
         shell: powershell
@@ -127,18 +127,27 @@ jobs:
           mvn -version
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Maven is not installed or not available in PATH."
+            throw "Maven is not installed or unavailable."
           }
 
           if (-not (Test-Path "pom.xml")) {
             throw "pom.xml was not found."
           }
 
-          Write-Host "pom.xml verified."
+          $m2 = "$env:USERPROFILE\.m2\repository"
 
-      # ----------------------------------------
-      # 4. CONFIGURE TEST EXECUTION
-      # ----------------------------------------
+          if (Test-Path $m2) {
+            Write-Host "Existing Maven repository found: $m2"
+          }
+          else {
+            Write-Host "Maven repository does not exist yet. Maven may download dependencies."
+          }
+
+          Write-Host "Environment verification completed."
+
+      # ========================================
+      # 4. CONFIGURE EXECUTION
+      # ========================================
 
       - name: Configure Test Execution
         id: config
@@ -188,13 +197,11 @@ jobs:
             throw "DataProvider thread count must be between 1 and 32."
           }
 
-          # Serial execution must remain serial.
           if ($execution -eq "serial") {
             $threadCount = 1
             $dataProviderThreadCount = 1
           }
 
-          # TestNG uses class names, not BDD feature paths.
           if ($framework -eq "testng" -and
               $target -eq "src/test/resources/features/Login_Test.feature") {
             $target = ""
@@ -218,16 +225,17 @@ jobs:
           Write-Host "Execution: $execution"
           Write-Host "Browser: $browser"
           Write-Host "Headless: $headless"
-          Write-Host "Maven Profile: $profile"
-          Write-Host "Test Target: $target"
-          Write-Host "Thread Count: $threadCount"
-          Write-Host "DataProvider Thread Count: $dataProviderThreadCount"
+          Write-Host "Profile: $profile"
+          Write-Host "Target: $target"
+          Write-Host "Threads: $threadCount"
+          Write-Host "DataProvider threads: $dataProviderThreadCount"
 
-      # ----------------------------------------
-      # 5. INSTALL / VERIFY BROWSERS
-      # ----------------------------------------
+      # ========================================
+      # 5. VERIFY INSTALLED BROWSERS
+      # No browser reinstallation.
+      # ========================================
 
-      - name: Install and Verify Browsers
+      - name: Verify Installed Browsers
         shell: powershell
         run: |
           $selected = $env:SELECTED_BROWSER
@@ -239,120 +247,41 @@ jobs:
             $browsers = @($selected)
           }
 
-          function Get-BrowserExecutable($browser) {
+          $browserPaths = @{
+            chrome = @(
+              "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+              "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+              "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+            )
 
-            $paths = switch ($browser) {
+            edge = @(
+              "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+              "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+            )
 
-              "chrome" {
-                @(
-                  "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-                  "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
-                  "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
-                )
-              }
-
-              "edge" {
-                @(
-                  "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
-                  "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
-                )
-              }
-
-              "firefox" {
-                @(
-                  "$env:ProgramFiles\Mozilla Firefox\firefox.exe",
-                  "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe"
-                )
-              }
-            }
-
-            foreach ($path in $paths) {
-              if (Test-Path $path) {
-                return $path
-              }
-            }
-
-            return $null
+            firefox = @(
+              "$env:ProgramFiles\Mozilla Firefox\firefox.exe",
+              "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe"
+            )
           }
 
           foreach ($browser in $browsers) {
 
-            $executable = Get-BrowserExecutable $browser
+            $found = $browserPaths[$browser] |
+              Where-Object { Test-Path $_ } |
+              Select-Object -First 1
 
-            if (-not $executable) {
-
-              Write-Host "$browser is missing. Attempting installation."
-
-              if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-                throw "winget is unavailable. Install $browser manually."
-              }
-
-              $package = switch ($browser) {
-                "chrome"  { "Google.Chrome" }
-                "edge"    { "Microsoft.Edge" }
-                "firefox" { "Mozilla.Firefox" }
-              }
-
-              winget install --id $package --exact --silent `
-                --accept-package-agreements `
-                --accept-source-agreements
-
-              if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
-                throw "Installation failed for $browser."
-              }
-
-              $executable = Get-BrowserExecutable $browser
+            if (-not $found) {
+              throw "$browser is not installed on this runner."
             }
 
-            if (-not $executable) {
-              throw "$browser executable could not be located."
-            }
-
-            Write-Host "$browser verified: $executable"
+            Write-Host "$browser verified: $found"
           }
 
-      # ----------------------------------------
-      # 6. RESOLVE MAVEN DEPENDENCIES
-      # ----------------------------------------
-
-      - name: Resolve Maven Dependencies
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force `
-            -Path "ci-artifacts/setup" | Out-Null
-
-          $mvnPath = (Get-Command mvn.cmd -ErrorAction Stop).Source
-
-          $stdout = "ci-artifacts/setup/dependency-stdout.log"
-          $stderr = "ci-artifacts/setup/dependency-stderr.log"
-
-          $process = Start-Process `
-            -FilePath $mvnPath `
-            -ArgumentList "-B -ntp dependency:resolve" `
-            -WorkingDirectory (Get-Location).Path `
-            -RedirectStandardOutput $stdout `
-            -RedirectStandardError $stderr `
-            -Wait `
-            -PassThru `
-            -NoNewWindow
-
-          if (Test-Path $stdout) {
-            Get-Content $stdout
-          }
-
-          if (Test-Path $stderr) {
-            Get-Content $stderr
-          }
-
-          if ($process.ExitCode -ne 0) {
-            throw "Maven dependency resolution failed. Exit code: $($process.ExitCode)"
-          }
-
-          Write-Host "Maven dependencies resolved successfully."
-
-      # ----------------------------------------
-      # 7. EXECUTE SELENIUM TESTS
-      # ----------------------------------------
+      # ========================================
+      # 6. RUN SELENIUM AUTOMATION
+      # Reuses local Maven dependencies.
+      # ========================================
 
       - name: Run Selenium Automation
         shell: powershell
@@ -437,14 +366,9 @@ jobs:
             }
 
             Write-Host "Framework: $framework"
-            Write-Host "Maven Profile: $profile"
+            Write-Host "Profile: $profile"
             Write-Host "Browser: $browser"
             Write-Host "Headless: $headless"
-            Write-Host "Thread Count: $threadCount"
-            Write-Host "DataProvider Thread Count: $dataProviderThreadCount"
-
-            Write-Host "Maven arguments:"
-            Write-Host ($mavenArgs -join " ")
 
             $browserArtifact = "ci-artifacts/$browser"
 
@@ -455,14 +379,13 @@ jobs:
             $stderrLog = Join-Path $browserArtifact "maven-stderr.log"
             $combinedLog = Join-Path $browserArtifact "maven-execution.log"
 
-            # Quote arguments for Windows process execution.
             $quotedArgs = foreach ($argument in $mavenArgs) {
               '"' + $argument.Replace('"', '\"') + '"'
             }
 
             $argumentLine = $quotedArgs -join " "
 
-            Write-Host "Starting Maven process..."
+            Write-Host "Starting Maven..."
 
             $process = Start-Process `
               -FilePath $mvnPath `
@@ -476,28 +399,34 @@ jobs:
 
             $testExitCode = $process.ExitCode
 
-            # Display and combine Maven output.
             if (Test-Path $stdoutLog) {
-              Get-Content $stdoutLog | Set-Content $combinedLog
-              Write-Host "========== MAVEN STANDARD OUTPUT =========="
+              Get-Content $stdoutLog |
+                Set-Content $combinedLog
+
+              Write-Host "========== MAVEN OUTPUT =========="
               Get-Content $stdoutLog
             }
 
             if (Test-Path $stderrLog) {
-              Get-Content $stderrLog | Add-Content $combinedLog
-              Write-Host "========== MAVEN STANDARD ERROR =========="
+              Get-Content $stderrLog |
+                Add-Content $combinedLog
+
+              Write-Host "========== MAVEN ERRORS / WARNINGS =========="
               Get-Content $stderrLog
             }
 
             Write-Host "Maven exit code: $testExitCode"
 
-            # Preserve reports before the next clean execution.
+            # Preserve TestNG reports.
             if (Test-Path "test-output") {
               Copy-Item "test-output" `
-                "$browserArtifact/test-output" -Recurse -Force
+                "$browserArtifact/test-output" `
+                -Recurse -Force
             }
 
+            # Preserve Cucumber reports.
             if (Test-Path "target/cucumber-reports") {
+
               New-Item -ItemType Directory -Force `
                 -Path "$browserArtifact/target" | Out-Null
 
@@ -506,7 +435,9 @@ jobs:
                 -Recurse -Force
             }
 
+            # Preserve Surefire reports.
             if (Test-Path "target/surefire-reports") {
+
               New-Item -ItemType Directory -Force `
                 -Path "$browserArtifact/target" | Out-Null
 
@@ -536,48 +467,28 @@ jobs:
 
           Write-Host "All selected browser executions passed."
 
-      # ----------------------------------------
-      # 8. TESTNG DASHBOARD ARTIFACT
-      # ----------------------------------------
+      # ========================================
+      # 7. UPLOAD REPORTS AND LOGS ONCE
+      # ========================================
 
-      - name: Upload TestNG Execution Dashboard
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: TestNG-Execution-Dashboard
-          path: ci-artifacts/**/test-output/dashboard/ExecutionDashboard.html
-          if-no-files-found: warn
-          retention-days: 14
-
-      # ----------------------------------------
-      # 9. CUCUMBER HTML REPORT
-      # ----------------------------------------
-
-      - name: Upload Cucumber HTML Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Cucumber-BDD-HTML-Report
-          path: ci-artifacts/**/target/cucumber-reports/cucumber.html
-          if-no-files-found: warn
-          retention-days: 14
-
-      # ----------------------------------------
-      # 10. COMPLETE AUTOMATION REPORTS
-      # ----------------------------------------
-
-      - name: Upload Complete Automation Reports
+      - name: Upload Automation Reports and Logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Selenium-Automation-Reports
-          path: ci-artifacts/
+          path: |
+            ci-artifacts/**/maven-stdout.log
+            ci-artifacts/**/maven-stderr.log
+            ci-artifacts/**/maven-execution.log
+            ci-artifacts/**/test-output/dashboard/ExecutionDashboard.html
+            ci-artifacts/**/target/cucumber-reports/**
+            ci-artifacts/**/target/surefire-reports/**
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 7
 
-      # ----------------------------------------
-      # 11. EXECUTION SUMMARY
-      # ----------------------------------------
+      # ========================================
+      # 8. EXECUTION SUMMARY
+      # ========================================
 
       - name: Automation Execution Summary
         if: always()
