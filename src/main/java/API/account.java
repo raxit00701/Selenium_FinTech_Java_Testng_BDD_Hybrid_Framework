@@ -25,27 +25,47 @@ public class account {
 
     private static String loadBaseUrl() {
 
+        // Priority 1: Environment variable (GitHub Actions / CI)
+        String baseUrl = System.getenv("API_BASE_URL");
+
+        if (baseUrl != null && !baseUrl.trim().isEmpty()) {
+            System.out.println("API_BASE_URL loaded from environment variable.");
+            return normalizeUrl(baseUrl);
+        }
+
+        // Priority 2: Local .env file
         String envPath = "src/main/java/env/.env";
         Properties properties = new Properties();
 
         try (FileInputStream input = new FileInputStream(envPath)) {
+
             properties.load(input);
 
-            String baseUrl = properties.getProperty("API_BASE_URL");
+            baseUrl = properties.getProperty("API_BASE_URL");
 
             if (baseUrl == null || baseUrl.trim().isEmpty()) {
                 throw new IllegalStateException(
-                        "API_BASE_URL is missing in .env file"
+                    "API_BASE_URL is missing in environment variables and .env file."
                 );
             }
 
-            return baseUrl.trim().replaceAll("/+$", "");
+            System.out.println("API_BASE_URL loaded from local .env file.");
+
+            return normalizeUrl(baseUrl);
 
         } catch (IOException e) {
+
             throw new IllegalStateException(
-                    "Unable to load API_BASE_URL from " + envPath, e
+                "Unable to load API_BASE_URL. "
+                + "Configure API_BASE_URL as an environment variable "
+                + "or provide " + envPath,
+                e
             );
         }
+    }
+
+    private static String normalizeUrl(String baseUrl) {
+        return baseUrl.trim().replaceAll("/+$", "");
     }
 
     public static Response getNewAccountPage(WebDriver driver) {
@@ -58,7 +78,7 @@ public class account {
 
         if (currentUrl == null || !currentUrl.startsWith(BASE_URI)) {
             throw new IllegalStateException(
-                    "Browser must be on the configured API_BASE_URL."
+                "Browser must be on the configured API_BASE_URL."
             );
         }
 
