@@ -53,7 +53,7 @@ It is built around **two interchangeable test engines**, **TestNG** and **Cucumb
 | JSON data sets | **8** |
 | Report types | **4**: Extent Spark · Custom Execution Dashboard · Cucumber HTML · TestNG/Surefire |
 | Custom annotations | **3**: `@Screenshot` · `@AutoScreenshots` · `@Video` |
-| Environment | **Docker / Docker Compose**: containerised system under test (`docker-compose.yml`) with a DB seed script (`ci-seed.sql`) |
+| Environment | **Docker / Docker Compose**: containerised system under test (`docker-compose.yml`) |
 | CI | GitHub Actions on a self-hosted **Windows x64** runner, multi-browser matrix loop |
 
 ---
@@ -74,8 +74,8 @@ It is built around **two interchangeable test engines**, **TestNG** and **Cucumb
 | 🥒 | **Gherkin report** | Native Cucumber HTML report at `target/cucumber-reports/cucumber.html`. |
 | 🎬 | **Video on demand** | `@Video` records MP4 through JavaCV and FFmpeg. Kept only for failed or skipped tests. |
 | 🧹 | **Self-cleaning evidence** | Stale evidence wiped once per run. Logs of **passed** tests are auto-deleted. |
-| 🗄️ | **DB layer** | MariaDB JDBC access for data verification and seeding (`ci-seed.sql`). |
-| 🐳 | **Dockerised environment** | One command (`docker compose up -d`) brings up the system under test. `ci-seed.sql` gives every run the same starting data. |
+| 🗄️ | **DB layer** | MariaDB JDBC access for data verification and setup. |
+| 🐳 | **Dockerised environment** | One command (`docker compose up -d`) brings up the system under test, so every machine runs against the same environment. |
 | 🔐 | **Secrets-safe config** | `.env` locally (java-dotenv), GitHub Actions `vars` and `secrets` in CI. |
 | 🚦 | **CI-ready** | Parameterised `workflow_dispatch`, input validation, multi-browser loop, per-browser artifacts, job summary. |
 
@@ -140,7 +140,7 @@ flowchart TB
         COMPOSE["📦 docker-compose.yml"]
         KBUI["Kill Bill UI"]
         KBAPI["Kill Bill REST API"]
-        KBDB[("MariaDB<br/>seeded by ci-seed.sql")]
+        KBDB[("MariaDB")]
         COMPOSE -.-> KBUI
         COMPOSE -.-> KBAPI
         COMPOSE -.-> KBDB
@@ -171,7 +171,7 @@ flowchart TB
 | ④ | **Domain / access** | Talk to the product: UI page objects, REST clients, SQL. | `pages/Dashboard`, `API/*`, `DB/DatabaseConnection` |
 | ⑤ | **Core** | Browser lifecycle, element tracking, test data, configuration. | `base/Base`, `base/DriverFactory`, `ElementTracker`, `JsonReader`, `.env` |
 | ⑥ | **Observability** | Turn every execution into reports, screenshots, video and logs. | `utils/artifact/ReportingListener`, `utils/report/*`, `utils/screenshot/*`, `utils/Videocapture/*`, `utils/log/LogUtil` |
-| 🐳 | **Environment (Docker)** | Containerised system under test that the API, UI and DB layers run against. | `docker-compose.yml`, `ci-seed.sql` |
+| 🐳 | **Environment (Docker)** | Containerised system under test that the API, UI and DB layers run against. | `docker-compose.yml` |
 
 ### Test lifecycle
 
@@ -613,7 +613,7 @@ flowchart LR
 
 ## Getting Started
 
-**Prerequisites:** JDK **17+** · Maven **3.9+** · Chrome / Edge / Firefox · **Docker** with Compose v2 (Docker Desktop on Windows / macOS) to run the environment from `docker-compose.yml` and `ci-seed.sql` · a configured `.env`.
+**Prerequisites:** JDK **17+** · Maven **3.9+** · Chrome / Edge / Firefox · **Docker** with Compose v2 (Docker Desktop on Windows / macOS) to run the environment from `docker-compose.yml` · a configured `.env`.
 
 ```bash
 # 1. Clone
@@ -680,7 +680,7 @@ test-output/
 6. **Clean runs.** Stale artifacts are purged, passed-test noise is deleted, orphan browsers are impossible.
 7. **One core, two engines.** TestNG and Cucumber reuse the same drivers, clients, data and reporting.
 8. **CI parity.** The pipeline uses the same Maven profiles and flags as a local run.
-9. **Reproducible environments.** Docker Compose plus a seed script give every machine the same system under test.
+9. **Reproducible environments.** Docker Compose gives every machine the same system under test.
 
 ---
 
@@ -697,7 +697,7 @@ test-output/
 | Passed test has no log | By design. Logs are retained only for failures and skips. |
 | Connection refused on API / UI / DB | Containers not up or not healthy yet. Run `docker compose ps` and `docker compose logs -f`. |
 | Port already in use on `docker compose up` | Stop the conflicting process or container, then run `docker compose up -d` again. |
-| Stale or inconsistent data between runs | Reset with `docker compose down -v`, then `docker compose up -d` to start from the seed data. |
+| Stale or inconsistent data between runs | Reset with `docker compose down -v`, then `docker compose up -d` to start from a clean environment. |
 
 ---
 
